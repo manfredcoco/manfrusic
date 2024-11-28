@@ -1,11 +1,12 @@
-version: "3"
+version: "3.8"
 
 services:
-  JMusicBot:
-    container_name: JMusicBot
+  jmusicbot:
     image: alexandreteles/jmusicbot
-    restart: always
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - DISCORD_OWNER_ID=${DISCORD_OWNER_ID}
+      - PREFIX=${PREFIX}
     volumes:
-      - /path/to/config.txt:/app/config.txt:ro
-      - /path/to/serversettings.json:/app/serversettings.json:ro
-      - /path/to/playlists:/app/playlists:ro
+      - ./playlists:/app/playlists:ro
+    restart: always
