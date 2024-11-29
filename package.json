@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "@discordjs/voice": "^0.18.0",
+    "@distube/ytdl-core": "^4.15.1",
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
@@ -12,8 +13,7 @@
     "play-dl": "^1.9.7",
     "ws": "^8.16.0",
     "youtube-search-api": "^1.2.2",
-    "yt-search": "^2.12.1",
-    "ytdl-core": "^4.11.5"
+    "yt-search": "^2.12.1"
   },
   "name": "discord",
   "version": "1.0.0",

@@ -1,4 +1,4 @@
-const play = require('play-dl');
+const ytdl = require('@distube/ytdl-core');
 const yts = require('yt-search');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
@@ -26,56 +26,36 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
         }
 
         try {
-            console.log('Getting video info from YouTube:', videoUrl);
-            const yt_info = await play.video_info(videoUrl);
-            const stream = await play.stream_from_info(yt_info);
+            console.log('Getting video info');
+            const info = await ytdl.getInfo(videoUrl);
+            const format = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
             
-            let lastProgress = 0;
-            const duration = yt_info.video_details.durationInSec;
+            console.log('Starting download with format:', format.mimeType);
+            const videoStream = ytdl(videoUrl, { format: format });
             
-            console.log('Starting FFmpeg direct stream conversion');
-            progressCallback(0);
+            let downloadedBytes = 0;
+            const totalBytes = format.contentLength;
 
-            ffmpeg(stream.stream)
-                .format('mp3')
-                .audioCodec('libmp3lame')
+            videoStream.on('progress', (_, downloaded, total) => {
+                const percent = Math.round((downloaded / total) * 100);
+                console.log(`Download: ${percent}% (${Math.round(downloaded/1024/1024)}MB/${Math.round(total/1024/1024)}MB)`);
+                progressCallback(percent);
+            });
+
+            const ffmpegProcess = ffmpeg(videoStream)
+                .toFormat('mp3')
                 .audioBitrate('192k')
-                .on('codecData', data => {
-                    console.log('Input codec data:', data);
-                })
-                .on('progress', progress => {
-                    if (progress.timemark) {
-                        // Convert timemark to seconds
-                        const parts = progress.timemark.split(':');
-                        const seconds = parseInt(parts[0]) * 3600 + 
-                                     parseInt(parts[1]) * 60 + 
-                                     parseFloat(parts[2]);
-                        
-                        // Calculate percentage
-                        const percent = Math.min(Math.round((seconds / duration) * 100), 100);
-                        
-                        if (percent !== lastProgress) {
-                            console.log(`Progress: ${percent}% (${progress.timemark} / ${duration}s)`);
-                            progressCallback(percent);
-                            lastProgress = percent;
-                        }
-                    }
-                })
                 .on('end', () => {
                     console.log('Processing finished');
-                    if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
-                        console.log('File successfully saved:', outputPath);
-                        progressCallback(100);
-                        resolve(outputPath);
-                    } else {
-                        reject(new Error('Output file is empty or missing'));
-                    }
+                    progressCallback(100);
+                    resolve(outputPath);
                 })
                 .on('error', (err) => {
-                    console.error('FFmpeg error:', err);
+                    console.error('Error:', err);
                     reject(err);
-                })
-                .save(outputPath);
+                });
+
+            ffmpegProcess.save(outputPath);
 
         } catch (error) {
             console.error('Error in download process:', error);
