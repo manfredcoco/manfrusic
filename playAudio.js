@@ -13,6 +13,7 @@ const {
 const { join } = require('path');
 const fs = require('fs');
 const Fuse = require('fuse.js');
+const WebSocket = require('ws');
 
 if (!process.env.BOT_TOKEN) {
     console.error('BOT_TOKEN is not set in environment variables');
@@ -37,6 +38,32 @@ const client = new Client({
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMessages
     ]
+});
+
+const ws = new WebSocket('ws://localhost:3001');
+
+ws.on('message', (data) => {
+    try {
+        const message = JSON.parse(data);
+        if (message.type === 'fileChange') {
+            console.log('Detected file change, reloading playlist');
+            loadPlaylist();
+        }
+    } catch (error) {
+        console.error('WebSocket message error:', error);
+    }
+});
+
+ws.on('error', (error) => {
+    console.error('WebSocket error:', error);
+});
+
+// Add reconnection logic
+ws.on('close', () => {
+    console.log('WebSocket disconnected, attempting to reconnect...');
+    setTimeout(() => {
+        ws = new WebSocket('ws://localhost:3001');
+    }, 5000);
 });
 
 function stopCurrentPlayback() {
@@ -134,7 +161,7 @@ async function startPlayback(initialConnection = null, message = null) {
         const player = createAudioPlayer({
             behaviors: {
                 noSubscriber: NoSubscriberBehavior.Play,
-                maxMissedFrames: 200
+                maxMissedFrames: 1000
             }
         });
         currentPlayer = player;
@@ -189,26 +216,25 @@ async function startPlayback(initialConnection = null, message = null) {
             console.log('Audio playback started');
         });
 
-        player.on(AudioPlayerStatus.Idle, () => {
-            console.log('Song finished, playing next song');
-            if (!isSkipping) {
-                setTimeout(() => {
-                    startPlayback(connection, message).catch(console.error);
-                }, 1000);
+        player.on(AudioPlayerStatus.Idle, (oldState) => {
+            if (oldState.status === AudioPlayerStatus.Playing) {
+                console.log('Song finished naturally, playing next song');
+                startPlayback(connection, message).catch(console.error);
             }
         });
 
         player.on('error', error => {
             console.error('Player error:', error);
-            player.play(resource);
+            if (error.message !== 'Resource ended prematurely') {
+                player.play(resource);
+            }
         });
 
         player.play(resource);
-
+        return true;
     } catch (error) {
-        console.error('Setup error:', error);
-        isConnected = false;
-        cleanup();
+        console.error('Playback error:', error);
+        return false;
     }
 }
 
@@ -399,7 +425,7 @@ async function playSpecificSong(songFilename, connection = null) {
         const player = createAudioPlayer({
             behaviors: {
                 noSubscriber: NoSubscriberBehavior.Play,
-                maxMissedFrames: 200
+                maxMissedFrames: 1000
             }
         });
         currentPlayer = player;
@@ -432,14 +458,18 @@ async function playSpecificSong(songFilename, connection = null) {
             console.log('Audio playback started');
         });
 
-        player.on(AudioPlayerStatus.Idle, () => {
-            console.log('Song finished, playing next song');
-            startPlayback(connection).catch(console.error);
+        player.on(AudioPlayerStatus.Idle, (oldState) => {
+            if (oldState.status === AudioPlayerStatus.Playing) {
+                console.log('Song finished naturally, playing next song');
+                startPlayback(connection).catch(console.error);
+            }
         });
 
         player.on('error', error => {
             console.error('Player error:', error);
-            player.play(resource);
+            if (error.message !== 'Resource ended prematurely') {
+                player.play(resource);
+            }
         });
 
         player.play(resource);

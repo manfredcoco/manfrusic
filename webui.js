@@ -2,10 +2,12 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const WebSocket = require('ws');
 
 const app = express();
 const port = process.env.PORT || 3000;
 const MUSIC_DIR = path.join(__dirname, 'music');
+const wss = new WebSocket.Server({ port: 3001 });
 
 // Create music directory if it doesn't exist
 if (!fs.existsSync(MUSIC_DIR)) {
@@ -42,6 +44,12 @@ app.post('/upload', upload.single('mp3File'), (req, res) => {
     if (!req.file) {
         return res.status(400).send('No file uploaded.');
     }
+    // Notify bot about new file
+    wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({ type: 'fileChange' }));
+        }
+    });
     res.status(200).send('File uploaded successfully!');
 });
 
@@ -69,6 +77,12 @@ app.delete('/files/:filename', (req, res) => {
         if (err) {
             return res.status(500).send('Error deleting file');
         }
+        // Notify bot about file deletion
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ type: 'fileChange' }));
+            }
+        });
         res.send('File deleted successfully');
     });
 });
