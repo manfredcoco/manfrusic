@@ -33,13 +33,13 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
                 discordPlayerCompatibility: true
             });
 
+            // Get video duration in seconds
+            const duration = yt_info.video_details.durationInSec;
+            console.log('Video duration:', duration, 'seconds');
+
             console.log('Starting FFmpeg conversion');
             let startTime = Date.now();
-            let lastProgressUpdate = 0;
-
-            // Create write stream to track progress
-            const fileStream = fs.createWriteStream(outputPath);
-            let totalBytes = 0;
+            let lastProgress = 0;
 
             const ffmpegProcess = ffmpeg(stream.stream)
                 .audioBitrate(96)
@@ -47,43 +47,42 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
                 .on('start', () => {
                     console.log('FFmpeg started processing');
                     progressCallback(0);
-                });
-
-            // Pipe the FFmpeg output to our write stream
-            ffmpegProcess.pipe()
-                .on('data', (chunk) => {
-                    totalBytes += chunk.length;
-                    // Update progress every 100ms
-                    const now = Date.now();
-                    if (now - lastProgressUpdate > 100) {
-                        const progress = Math.min(Math.floor((totalBytes / 1000000) * 10), 100);
-                        console.log(`Download progress: ${progress}%`);
-                        progressCallback(progress);
-                        lastProgressUpdate = now;
+                })
+                .on('progress', (progress) => {
+                    // Calculate progress based on timestamp
+                    if (progress.timemark) {
+                        const time = progress.timemark.split(':');
+                        const seconds = (+time[0]) * 60 * 60 + (+time[1]) * 60 + (+time[2]);
+                        const percent = Math.min(Math.round((seconds / duration) * 100), 100);
+                        
+                        // Only update if progress has changed
+                        if (percent !== lastProgress) {
+                            console.log(`Processing: ${percent}% done (${progress.timemark} / ${duration}s)`);
+                            progressCallback(percent);
+                            lastProgress = percent;
+                        }
                     }
                 })
-                .pipe(fileStream);
-
-            fileStream.on('finish', () => {
-                const duration = (Date.now() - startTime) / 1000;
-                console.log(`Download completed: ${filename} (${duration.toFixed(2)}s)`);
-                progressCallback(100);
-                
-                if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
-                    console.log('File successfully saved:', outputPath);
-                    resolve(outputPath);
-                } else {
-                    reject(new Error('File was not created successfully'));
-                }
-            });
-
-            fileStream.on('error', (error) => {
-                console.error('File stream error:', error);
-                if (fs.existsSync(outputPath)) {
-                    fs.unlinkSync(outputPath);
-                }
-                reject(error);
-            });
+                .on('error', (error) => {
+                    console.error('FFmpeg error:', error);
+                    if (fs.existsSync(outputPath)) {
+                        fs.unlinkSync(outputPath);
+                    }
+                    reject(error);
+                })
+                .on('end', () => {
+                    const duration = (Date.now() - startTime) / 1000;
+                    console.log(`Download completed: ${filename} (${duration.toFixed(2)}s)`);
+                    progressCallback(100);
+                    
+                    if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+                        console.log('File successfully saved:', outputPath);
+                        resolve(outputPath);
+                    } else {
+                        reject(new Error('File was not created successfully'));
+                    }
+                })
+                .save(outputPath);
 
         } catch (error) {
             console.error('Error in download process:', error);

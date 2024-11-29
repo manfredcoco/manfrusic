@@ -523,11 +523,11 @@ client.on('interactionCreate', async interaction => {
                     console.log('Sanitized filename:', filename);
 
                     const updateProgress = async (percent) => {
-                        const blocks = Math.floor(percent / 10);
-                        const progressBar = '█'.repeat(blocks) + '□'.repeat(10 - blocks);
-                        const message = `Downloading: ${selectedVideo.title}\nProgress: [${progressBar}] ${percent}%`;
-                        console.log(`Progress update: ${percent}%`);
                         try {
+                            const blocks = Math.floor(percent / 10);
+                            const progressBar = '█'.repeat(blocks) + '□'.repeat(10 - blocks);
+                            const message = `Downloading: ${selectedVideo.title}\nProgress: [${progressBar}] ${percent}%`;
+                            console.log(`Progress update: ${percent}%`);
                             await interaction.editReply(message);
                         } catch (error) {
                             console.error('Failed to update progress:', error);
