@@ -18,9 +18,6 @@ async function downloadYoutubeAudio(videoUrl, filename) {
         ensureMusicDir();
         
         const outputPath = path.join(MUSIC_DIR, `${filename}.mp3`);
-        const TIMEOUT_DURATION = 60000; // 60 seconds timeout
-        let hasProgress = false;
-        let timeoutId;
         
         if (fs.existsSync(outputPath)) {
             console.log('File already exists:', outputPath);
@@ -31,80 +28,56 @@ async function downloadYoutubeAudio(videoUrl, filename) {
         try {
             console.log('Getting stream from YouTube:', videoUrl);
             const yt_info = await play.video_info(videoUrl);
-            const stream = await play.stream_from_info(yt_info);
+            const stream = await play.stream_from_info(yt_info, {
+                quality: 2, // Try a lower quality
+                discordPlayerCompatibility: true
+            });
 
             console.log('Starting FFmpeg conversion');
             let startTime = Date.now();
-            let lastProgressTime = Date.now();
-
-            // Set timeout for the entire process
-            timeoutId = setTimeout(() => {
-                if (!hasProgress) {
-                    console.error('Download timed out');
-                    reject(new Error('Download timed out'));
-                }
-            }, TIMEOUT_DURATION);
 
             const ffmpegProcess = ffmpeg(stream.stream)
-                .audioBitrate(128)
+                .audioBitrate(96) // Lower bitrate
                 .toFormat('mp3')
                 .on('start', () => {
                     console.log('FFmpeg started processing');
                 })
                 .on('progress', (progress) => {
-                    hasProgress = true;
-                    lastProgressTime = Date.now();
                     if (progress.percent) {
                         console.log(`Processing: ${Math.round(progress.percent)}% done`);
                     }
                 })
                 .on('error', (error) => {
-                    clearTimeout(timeoutId);
                     console.error('FFmpeg error:', error);
-                    // Clean up partial file if it exists
                     if (fs.existsSync(outputPath)) {
                         fs.unlinkSync(outputPath);
                     }
                     reject(error);
                 })
                 .on('end', () => {
-                    clearTimeout(timeoutId);
                     const duration = (Date.now() - startTime) / 1000;
                     console.log(`Download completed: ${filename} (${duration.toFixed(2)}s)`);
                     
-                    // Verify file exists and has size
                     if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
                         console.log('File successfully saved:', outputPath);
                         resolve(outputPath);
                     } else {
                         reject(new Error('File was not created successfully'));
                     }
-                })
-                .save(outputPath);
+                });
 
-            // Monitor for stalled progress
-            const progressCheck = setInterval(() => {
-                if (Date.now() - lastProgressTime > 10000) { // 10 seconds without progress
-                    clearInterval(progressCheck);
-                    clearTimeout(timeoutId);
-                    console.error('Download stalled');
-                    ffmpegProcess.kill('SIGKILL');
-                    if (fs.existsSync(outputPath)) {
-                        fs.unlinkSync(outputPath);
-                    }
-                    reject(new Error('Download stalled'));
-                }
-            }, 5000);
+            // Set a more generous timeout
+            const timeout = setTimeout(() => {
+                ffmpegProcess.kill();
+                reject(new Error('FFmpeg process timed out'));
+            }, 120000); // 2 minutes
 
-            // Clean up progress check on success
-            ffmpegProcess.on('end', () => {
-                clearInterval(progressCheck);
-            });
+            ffmpegProcess
+                .save(outputPath)
+                .on('end', () => clearTimeout(timeout));
 
         } catch (error) {
-            clearTimeout(timeoutId);
             console.error('Error in download process:', error);
-            // Clean up partial file if it exists
             if (fs.existsSync(outputPath)) {
                 fs.unlinkSync(outputPath);
             }
