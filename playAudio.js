@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const { 
     joinVoiceChannel,
     createAudioPlayer,
@@ -217,15 +217,20 @@ async function startPlayback(initialConnection = null, message = null) {
         });
 
         player.on(AudioPlayerStatus.Idle, (oldState) => {
-            if (oldState.status === AudioPlayerStatus.Playing) {
-                console.log('Song finished naturally, playing next song');
-                startPlayback(connection, message).catch(console.error);
+            if (oldState.status === AudioPlayerStatus.Playing && !isSkipping) {
+                setTimeout(() => {
+                    if (currentPlayer === player) {  // Check if this is still the current player
+                        console.log('Song finished naturally, playing next song');
+                        startPlayback(connection, message).catch(console.error);
+                    }
+                }, 1000);
             }
         });
 
         player.on('error', error => {
             console.error('Player error:', error);
-            if (error.message !== 'Resource ended prematurely') {
+            if (error.message !== 'Resource ended prematurely' && currentPlayer === player) {
+                console.log('Attempting to recover from error');
                 player.play(resource);
             }
         });
@@ -283,136 +288,178 @@ connectWithRetry().catch(error => {
     process.exit(1);
 });
 
-// Add command handling
-client.on('messageCreate', async (message) => {
-    if (!message.content.startsWith('!')) return;
+// Define the commands
+const commands = [
+    new SlashCommandBuilder()
+        .setName('connect')
+        .setDescription('Connect bot to voice channel'),
+    new SlashCommandBuilder()
+        .setName('disconnect')
+        .setDescription('Disconnect bot from voice channel'),
+    new SlashCommandBuilder()
+        .setName('skip')
+        .setDescription('Skip current song'),
+    new SlashCommandBuilder()
+        .setName('search')
+        .setDescription('Search for a song')
+        .addStringOption(option =>
+            option.setName('query')
+                .setDescription('Search term')
+                .setRequired(true)),
+    new SlashCommandBuilder()
+        .setName('play')
+        .setDescription('Play a song from search results')
+        .addIntegerOption(option =>
+            option.setName('number')
+                .setDescription('Song number from search results')
+                .setRequired(true)
+                .setMinValue(1)
+                .setMaxValue(5)),
+    new SlashCommandBuilder()
+        .setName('volume')
+        .setDescription('Set playback volume')
+        .addIntegerOption(option =>
+            option.setName('level')
+                .setDescription('Volume level (0-100)')
+                .setRequired(true)
+                .setMinValue(0)
+                .setMaxValue(100))
+];
 
-    const command = message.content.toLowerCase().split(' ')[0];
-    const args = message.content.split(' ').slice(1);
+// Register commands with Discord
+const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);
 
-    switch (command) {
-        case '!volume':
-            const newVolume = parseFloat(args[0]);
-            if (isNaN(newVolume) || newVolume < 0 || newVolume > 2) {
-                message.reply('Please provide a valid volume between 0 and 2');
-                return;
-            }
-            currentVolume = newVolume;
-            if (currentPlayer) {
-                currentPlayer.state.resource.volume?.setVolume(currentVolume);
-                message.reply(`Volume set to ${currentVolume}`);
-            }
-            break;
+(async () => {
+    try {
+        console.log('Started refreshing application (/) commands.');
 
-        case '!connect':
-            if (isConnected) {
-                message.reply('Already connected! Use !disconnect first if you want to reconnect.');
-                return;
-            }
-            try {
-                console.log('Attempting to connect...');
-                const connection = await setupVoiceConnection();
-                console.log('Connection established');
-                loadPlaylist();
-                await startPlayback(connection, message);
-                message.reply('Connected and started playlist!');
-            } catch (error) {
-                console.error('Connect error:', error);
-                message.reply('Failed to connect to voice channel');
-                isConnected = false;
-            }
-            break;
+        await rest.put(
+            Routes.applicationGuildCommands(process.env.CLIENT_ID, SERVER_ID),
+            { body: commands },
+        );
 
-        case '!disconnect':
-            stopCurrentPlayback();
-            const connection = getVoiceConnection(SERVER_ID);
-            if (connection) {
-                connection.destroy();
-                isConnected = false;
-                message.reply('Disconnected from voice channel!');
-            } else {
-                message.reply('Not currently connected to any voice channel!');
-            }
-            break;
+        console.log('Successfully reloaded application (/) commands.');
+    } catch (error) {
+        console.error(error);
+    }
+})();
 
-        case '!skip':
-            if (!isConnected || !currentPlayer) {
-                message.reply('Nothing is currently playing!');
-                return;
-            }
-            try {
-                const connection = getVoiceConnection(SERVER_ID);
-                if (!connection) {
-                    message.reply('No active connection found!');
+// Update the event handler
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isCommand()) return;
+
+    try {
+        switch (interaction.commandName) {
+            case 'connect':
+                if (isConnected) {
+                    await interaction.reply('Already connected! Use /disconnect first if you want to reconnect.');
                     return;
                 }
-                isSkipping = true;
-                currentPlayer.stop();
-                await startPlayback(connection, message);
-                message.reply('Skipped to next song!');
-            } catch (error) {
-                console.error('Skip error:', error);
-                message.reply('Failed to skip song');
-            } finally {
-                isSkipping = false;
-            }
-            break;
+                try {
+                    console.log('Attempting to connect...');
+                    const connection = await setupVoiceConnection();
+                    console.log('Connection established');
+                    loadPlaylist();
+                    await startPlayback(connection, interaction);
+                    await interaction.reply('Connected and started playlist!');
+                } catch (error) {
+                    console.error('Connect error:', error);
+                    await interaction.reply('Failed to connect to voice channel');
+                    isConnected = false;
+                }
+                break;
 
-        case '!search':
-            if (args.length === 0) {
-                message.reply('Please provide a search term');
-                return;
-            }
-            
-            if (playlist.length === 0) {
-                message.reply('No songs available. Please add some MP3 files first.');
-                return;
-            }
-            
-            const searchTerm = args.join(' ');
-            const results = fuseSearch.search(searchTerm);
-            
-            if (results.length === 0) {
-                message.reply('No matches found');
-                return;
-            }
+            case 'disconnect':
+                stopCurrentPlayback();
+                const connection = getVoiceConnection(SERVER_ID);
+                if (connection) {
+                    connection.destroy();
+                    isConnected = false;
+                    await interaction.reply('Disconnected from voice channel!');
+                } else {
+                    await interaction.reply('Not currently connected to any voice channel!');
+                }
+                break;
 
-            // Store the results for later use
-            lastSearchResults = results;
+            case 'skip':
+                if (!isConnected || !currentPlayer) {
+                    await interaction.reply('Nothing is currently playing!');
+                    return;
+                }
+                try {
+                    const connection = getVoiceConnection(SERVER_ID);
+                    if (!connection) {
+                        await interaction.reply('No active connection found!');
+                        return;
+                    }
+                    isSkipping = true;
+                    currentPlayer.stop();
+                    await startPlayback(connection, interaction);
+                    await interaction.reply('Skipped to next song!');
+                } catch (error) {
+                    console.error('Skip error:', error);
+                    await interaction.reply('Failed to skip song');
+                } finally {
+                    isSkipping = false;
+                }
+                break;
 
-            // Get top 5 results
-            const topResults = results.slice(0, 5).map((result, index) => 
-                `${index + 1}. ${result.item.cleanName} (Match: ${Math.round((1 - result.score) * 100)}%)`
-            );
+            case 'search':
+                const query = interaction.options.getString('query');
+                if (playlist.length === 0) {
+                    await interaction.reply('No songs available. Please add some MP3 files first.');
+                    return;
+                }
+                
+                const results = fuseSearch.search(query);
+                
+                if (results.length === 0) {
+                    await interaction.reply('No matches found');
+                    return;
+                }
 
-            message.reply(`Top matches:\n${topResults.join('\n')}\n\nUse !play <number> to play a song`);
-            break;
+                lastSearchResults = results;
 
-        case '!play':
-            if (args.length === 0) {
-                message.reply('Please provide a number from the search results');
-                return;
-            }
+                const topResults = results.slice(0, 5).map((result, index) => 
+                    `${index + 1}. ${result.item.cleanName} (Match: ${Math.round((1 - result.score) * 100)}%)`
+                );
 
-            const selection = parseInt(args[0]) - 1;
-            
-            if (isNaN(selection) || selection < 0 || selection >= lastSearchResults.length) {
-                message.reply('Invalid selection. Please search first using !search');
-                return;
-            }
+                await interaction.reply(`Top matches:\n${topResults.join('\n')}\n\nUse /play <number> to play a song`);
+                break;
 
-            const selectedSong = lastSearchResults[selection].item.filename;
-            let voiceConnection = getVoiceConnection(SERVER_ID);
-            if (!voiceConnection) {
-                voiceConnection = await setupVoiceConnection();
-            }
-            
-            if (await playSpecificSong(selectedSong, voiceConnection)) {
-                message.reply(`Now playing: ${lastSearchResults[selection].item.cleanName}`);
-            } else {
-                message.reply('Failed to play the selected song');
-            }
-            break;
+            case 'play':
+                const number = interaction.options.getInteger('number');
+                if (!lastSearchResults || lastSearchResults.length === 0) {
+                    await interaction.reply('Please search for a song first using /search');
+                    return;
+                }
+                if (number < 1 || number > lastSearchResults.length) {
+                    await interaction.reply('Invalid song number');
+                    return;
+                }
+                const selectedSong = lastSearchResults[number - 1].item.filename;
+                const conn = getVoiceConnection(SERVER_ID) || await setupVoiceConnection();
+                if (await playSpecificSong(selectedSong, conn)) {
+                    await interaction.reply(`Playing: ${lastSearchResults[number - 1].item.cleanName}`);
+                } else {
+                    await interaction.reply('Failed to play the selected song');
+                }
+                break;
+
+            case 'volume':
+                const level = interaction.options.getInteger('level');
+                currentVolume = level / 100;
+                if (currentPlayer) {
+                    currentPlayer.state.resource.volume.setVolume(currentVolume);
+                }
+                await interaction.reply(`Volume set to ${level}%`);
+                break;
+        }
+    } catch (error) {
+        console.error('Command error:', error);
+        if (!interaction.replied) {
+            await interaction.reply('An error occurred while processing the command');
+        }
     }
 });
 
@@ -459,15 +506,20 @@ async function playSpecificSong(songFilename, connection = null) {
         });
 
         player.on(AudioPlayerStatus.Idle, (oldState) => {
-            if (oldState.status === AudioPlayerStatus.Playing) {
-                console.log('Song finished naturally, playing next song');
-                startPlayback(connection).catch(console.error);
+            if (oldState.status === AudioPlayerStatus.Playing && !isSkipping) {
+                setTimeout(() => {
+                    if (currentPlayer === player) {  // Check if this is still the current player
+                        console.log('Song finished naturally, playing next song');
+                        startPlayback(connection).catch(console.error);
+                    }
+                }, 1000);
             }
         });
 
         player.on('error', error => {
             console.error('Player error:', error);
-            if (error.message !== 'Resource ended prematurely') {
+            if (error.message !== 'Resource ended prematurely' && currentPlayer === player) {
+                console.log('Attempting to recover from error');
                 player.play(resource);
             }
         });
