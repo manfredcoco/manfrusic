@@ -14,6 +14,7 @@ const { join } = require('path');
 const fs = require('fs');
 const Fuse = require('fuse.js');
 const WebSocket = require('ws');
+const { searchYoutube, downloadYoutubeAudio } = require('./youtubeHandler');
 
 if (!process.env.BOT_TOKEN) {
     console.error('BOT_TOKEN is not set in environment variables');
@@ -28,6 +29,7 @@ let currentPlayer = null;
 let playlist = [];
 let fuseSearch;
 let lastSearchResults = [];
+let youtubeSearchResults = [];
 let isConnected = false; // Track connection state
 let isSkipping = false;
 
@@ -323,7 +325,24 @@ const commands = [
                 .setDescription('Volume level (0-100)')
                 .setRequired(true)
                 .setMinValue(0)
-                .setMaxValue(100))
+                .setMaxValue(100)),
+    new SlashCommandBuilder()
+        .setName('ytsearch')
+        .setDescription('Search for YouTube videos')
+        .addStringOption(option =>
+            option.setName('query')
+                .setDescription('Search term')
+                .setRequired(true)),
+    
+    new SlashCommandBuilder()
+        .setName('ytplay')
+        .setDescription('Play a video from YouTube search results')
+        .addIntegerOption(option =>
+            option.setName('number')
+                .setDescription('Video number from search results (1-10)')
+                .setRequired(true)
+                .setMinValue(1)
+                .setMaxValue(10))
 ];
 
 // Register commands with Discord
@@ -405,60 +424,120 @@ client.on('interactionCreate', async interaction => {
                 break;
 
             case 'search':
-                const query = interaction.options.getString('query');
+                const searchQuery = interaction.options.getString('query');
                 if (playlist.length === 0) {
                     await interaction.reply('No songs available. Please add some MP3 files first.');
                     return;
                 }
                 
-                const results = fuseSearch.search(query);
+                const searchResults = fuseSearch.search(searchQuery);
+                lastSearchResults = searchResults;
                 
-                if (results.length === 0) {
+                if (searchResults.length === 0) {
                     await interaction.reply('No matches found');
                     return;
                 }
 
-                lastSearchResults = results;
+                const topResults = searchResults.slice(0, 5).map((result, index) => 
+                    `${index + 1}. ${result.item.cleanName}`
+                ).join('\n');
 
-                const topResults = results.slice(0, 5).map((result, index) => 
-                    `${index + 1}. ${result.item.cleanName} (Match: ${Math.round((1 - result.score) * 100)}%)`
-                );
-
-                await interaction.reply(`Top matches:\n${topResults.join('\n')}\n\nUse /play <number> to play a song`);
+                await interaction.reply(`Top matches:\n${topResults}\n\nUse /play <number> to play a song`);
                 break;
 
             case 'play':
-                const number = interaction.options.getInteger('number');
+                const playNumber = interaction.options.getInteger('number');
                 if (!lastSearchResults || lastSearchResults.length === 0) {
                     await interaction.reply('Please search for a song first using /search');
                     return;
                 }
-                if (number < 1 || number > lastSearchResults.length) {
+                if (playNumber < 1 || playNumber > lastSearchResults.length) {
                     await interaction.reply('Invalid song number');
                     return;
                 }
-                const selectedSong = lastSearchResults[number - 1].item.filename;
+                const selectedSong = lastSearchResults[playNumber - 1].item.filename;
                 const conn = getVoiceConnection(SERVER_ID) || await setupVoiceConnection();
                 if (await playSpecificSong(selectedSong, conn)) {
-                    await interaction.reply(`Playing: ${lastSearchResults[number - 1].item.cleanName}`);
+                    await interaction.reply(`Playing: ${lastSearchResults[playNumber - 1].item.cleanName}`);
                 } else {
                     await interaction.reply('Failed to play the selected song');
                 }
                 break;
 
             case 'volume':
-                const level = interaction.options.getInteger('level');
-                currentVolume = level / 100;
+                const volumeLevel = interaction.options.getInteger('level');
+                currentVolume = volumeLevel / 100;
                 if (currentPlayer) {
                     currentPlayer.state.resource.volume.setVolume(currentVolume);
                 }
-                await interaction.reply(`Volume set to ${level}%`);
+                await interaction.reply(`Volume set to ${volumeLevel}%`);
+                break;
+
+            case 'ytsearch':
+                const ytQuery = interaction.options.getString('query');
+                await interaction.deferReply();
+                
+                try {
+                    const ytResults = await searchYoutube(ytQuery);
+                    youtubeSearchResults = ytResults;
+                    
+                    const ytResultList = ytResults.map((video, index) => 
+                        `${index + 1}. ${video.title}\n` +
+                        `   Duration: ${video.duration} | Channel: ${video.author}\n`
+                    ).join('\n');
+                    
+                    await interaction.editReply(
+                        `**YouTube Search Results:**\n\n${ytResultList}\n` +
+                        `Use /ytplay <number> to play a video`
+                    );
+                } catch (error) {
+                    console.error('Search error:', error);
+                    await interaction.editReply('Failed to search YouTube');
+                }
+                break;
+
+            case 'ytplay':
+                const ytNumber = interaction.options.getInteger('number');
+                
+                if (!youtubeSearchResults || youtubeSearchResults.length === 0) {
+                    await interaction.reply('Please search for videos first using /ytsearch');
+                    return;
+                }
+
+                if (ytNumber < 1 || ytNumber > youtubeSearchResults.length) {
+                    await interaction.reply('Invalid video number');
+                    return;
+                }
+
+                const selectedVideo = youtubeSearchResults[ytNumber - 1];
+                await interaction.deferReply();
+                
+                try {
+                    await interaction.editReply(`Downloading: ${selectedVideo.title}`);
+                    
+                    const filename = sanitizeFilename(selectedVideo.title);
+                    const filePath = await downloadYoutubeAudio(selectedVideo.url, filename);
+                    
+                    const ytConn = getVoiceConnection(SERVER_ID) || 
+                                 await setupVoiceConnection();
+                    
+                    if (await playSpecificSong(`${filename}.mp3`, ytConn)) {
+                        await interaction.editReply(`Now playing: ${selectedVideo.title}`);
+                    } else {
+                        await interaction.editReply('Failed to play the video');
+                    }
+                } catch (error) {
+                    console.error('Download/playback error:', error);
+                    await interaction.editReply('Failed to download or play the video');
+                }
                 break;
         }
     } catch (error) {
         console.error('Command error:', error);
-        if (!interaction.replied) {
+        if (!interaction.replied && !interaction.deferred) {
             await interaction.reply('An error occurred while processing the command');
+        } else if (!interaction.replied) {
+            await interaction.editReply('An error occurred while processing the command');
         }
     }
 });
@@ -531,4 +610,11 @@ async function playSpecificSong(songFilename, connection = null) {
         console.error('Playback error:', error);
         return false;
     }
+} 
+
+function sanitizeFilename(filename) {
+    return filename
+        .replace(/[^a-z0-9]/gi, '_')
+        .toLowerCase()
+        .substring(0, 200);
 } 

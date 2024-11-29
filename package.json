@@ -5,10 +5,14 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
     "ffmpeg-static": "^5.2.0",
+    "fluent-ffmpeg": "^2.1.2",
     "fuse.js": "^7.0.0",
     "multer": "^1.4.5-lts.1",
     "opusscript": "^0.0.8",
-    "ws": "^8.16.0"
+    "ws": "^8.16.0",
+    "youtube-search-api": "^1.2.2",
+    "yt-search": "^2.10.4",
+    "ytdl-core": "^4.11.5"
   },
   "name": "discord",
   "version": "1.0.0",
