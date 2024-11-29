@@ -9,11 +9,11 @@
     "fuse.js": "^7.0.0",
     "multer": "^1.4.5-lts.1",
     "opusscript": "^0.0.8",
+    "play-dl": "^1.9.7",
     "ws": "^8.16.0",
     "youtube-search-api": "^1.2.2",
-    "yt-search": "^2.10.4",
-    "ytdl-core": "^4.11.5",
-    "play-dl": "^1.9.7"
+    "yt-search": "^2.12.1",
+    "ytdl-core": "^4.11.5"
   },
   "name": "discord",
   "version": "1.0.0",

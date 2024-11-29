@@ -1,4 +1,5 @@
 const ytdl = require('ytdl-core');
+const yts = require('yt-search');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
