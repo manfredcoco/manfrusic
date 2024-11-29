@@ -520,8 +520,13 @@ client.on('interactionCreate', async interaction => {
                     console.log('Sanitized filename:', filename);
 
                     const outputPath = await downloadYoutubeAudio(selectedVideo.url, filename);
-                    await playAudioFile(outputPath, ytConn);
-                    await interaction.editReply(`Now playing: ${selectedVideo.title}`);
+                    const success = await playSpecificSong(`${filename}.mp3`, ytConn);
+                    
+                    if (success) {
+                        await interaction.editReply(`Now playing: ${selectedVideo.title}`);
+                    } else {
+                        await interaction.editReply('Failed to play the audio');
+                    }
 
                 } catch (error) {
                     console.error('Download/playback error:', error);
