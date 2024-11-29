@@ -18,7 +18,6 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
         ensureMusicDir();
         
         const outputPath = path.join(MUSIC_DIR, `${filename}.mp3`);
-        const tempFile = path.join(MUSIC_DIR, `${filename}.temp`);
         
         if (fs.existsSync(outputPath)) {
             console.log('File already exists:', outputPath);
@@ -29,96 +28,60 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
         try {
             console.log('Getting video info from YouTube:', videoUrl);
             const yt_info = await play.video_info(videoUrl);
-            const stream = await play.stream_from_info(yt_info, {
-                quality: 2, // lower quality for faster download
-                discordPlayerCompatibility: true
-            });
-
-            // Get video duration for progress calculation
+            const stream = await play.stream_from_info(yt_info);
+            
+            let lastProgress = 0;
             const duration = yt_info.video_details.durationInSec;
-            console.log('Video duration:', duration, 'seconds');
-
-            console.log('Starting download...');
+            
+            console.log('Starting FFmpeg direct stream conversion');
             progressCallback(0);
-            
-            // First download to temp file
-            const writeStream = fs.createWriteStream(tempFile);
-            let downloadedSize = 0;
-            
-            stream.stream
-                .on('data', chunk => {
-                    downloadedSize += chunk.length;
-                    // Estimate progress based on typical audio bitrate
-                    const estimatedTotal = duration * 128 * 1024 / 8; // Assuming 128kbps
-                    const percent = Math.min(Math.round((downloadedSize / estimatedTotal) * 50), 50);
-                    console.log(`Download progress: ${percent}% (${Math.round(downloadedSize/1024/1024)}MB)`);
-                    progressCallback(percent);
+
+            ffmpeg(stream.stream)
+                .format('mp3')
+                .audioCodec('libmp3lame')
+                .audioBitrate('192k')
+                .on('codecData', data => {
+                    console.log('Input codec data:', data);
                 })
-                .pipe(writeStream);
-
-            // Wait for download to complete
-            await new Promise((resolve, reject) => {
-                writeStream.on('finish', resolve);
-                writeStream.on('error', (error) => {
-                    console.error('Write stream error:', error);
-                    reject(error);
-                });
-            });
-
-            console.log('Download completed, starting conversion');
-            progressCallback(50);
-
-            // Convert to MP3
-            await new Promise((resolve, reject) => {
-                ffmpeg(tempFile)
-                    .toFormat('mp3')
-                    .audioCodec('libmp3lame')
-                    .audioBitrate('192k')
-                    .on('progress', (progress) => {
-                        if (progress.percent) {
-                            const percent = Math.min(50 + Math.round(progress.percent / 2), 100);
-                            console.log(`Converting: ${progress.percent}% (Total: ${percent}%)`);
+                .on('progress', progress => {
+                    if (progress.timemark) {
+                        // Convert timemark to seconds
+                        const parts = progress.timemark.split(':');
+                        const seconds = parseInt(parts[0]) * 3600 + 
+                                     parseInt(parts[1]) * 60 + 
+                                     parseFloat(parts[2]);
+                        
+                        // Calculate percentage
+                        const percent = Math.min(Math.round((seconds / duration) * 100), 100);
+                        
+                        if (percent !== lastProgress) {
+                            console.log(`Progress: ${percent}% (${progress.timemark} / ${duration}s)`);
                             progressCallback(percent);
+                            lastProgress = percent;
                         }
-                    })
-                    .on('end', () => {
-                        console.log('Conversion completed');
-                        resolve();
-                    })
-                    .on('error', (error) => {
-                        console.error('Conversion error:', error);
-                        reject(error);
-                    })
-                    .save(outputPath);
-            });
-
-            // Clean up temp file
-            try {
-                fs.unlinkSync(tempFile);
-            } catch (error) {
-                console.error('Failed to delete temp file:', error);
-            }
-
-            if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
-                console.log('File successfully saved:', outputPath);
-                progressCallback(100);
-                resolve(outputPath);
-            } else {
-                throw new Error('File was not created successfully');
-            }
+                    }
+                })
+                .on('end', () => {
+                    console.log('Processing finished');
+                    if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+                        console.log('File successfully saved:', outputPath);
+                        progressCallback(100);
+                        resolve(outputPath);
+                    } else {
+                        reject(new Error('Output file is empty or missing'));
+                    }
+                })
+                .on('error', (err) => {
+                    console.error('FFmpeg error:', err);
+                    reject(err);
+                })
+                .save(outputPath);
 
         } catch (error) {
             console.error('Error in download process:', error);
-            // Clean up any partial files
-            [outputPath, tempFile].forEach(file => {
-                if (fs.existsSync(file)) {
-                    try {
-                        fs.unlinkSync(file);
-                    } catch (e) {
-                        console.error('Failed to delete file:', file, e);
-                    }
-                }
-            });
+            if (fs.existsSync(outputPath)) {
+                fs.unlinkSync(outputPath);
+            }
             reject(error);
         }
     });
