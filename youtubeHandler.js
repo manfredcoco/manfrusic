@@ -6,6 +6,12 @@ const fs = require('fs');
 
 const MUSIC_DIR = path.join(__dirname, 'music');
 
+function ensureMusicDir() {
+    if (!fs.existsSync(MUSIC_DIR)) {
+        fs.mkdirSync(MUSIC_DIR, { recursive: true });
+    }
+}
+
 async function searchYoutube(query) {
     try {
         const results = await yts(query);
@@ -22,6 +28,7 @@ async function searchYoutube(query) {
 }
 
 async function downloadYoutubeAudio(videoUrl, filename) {
+    ensureMusicDir();
     return new Promise(async (resolve, reject) => {
         const outputPath = path.join(MUSIC_DIR, `${filename}.mp3`);
         

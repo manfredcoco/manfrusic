@@ -76,35 +76,29 @@ function stopCurrentPlayback() {
 }
 
 async function setupVoiceConnection() {
-    if (isConnected) {
-        console.log('Already connected, stopping current playback');
-        stopCurrentPlayback();
-        return getVoiceConnection(SERVER_ID);
-    }
-
-    // Destroy any existing connections
-    const existingConnection = getVoiceConnection(SERVER_ID);
-    if (existingConnection) {
-        existingConnection.destroy();
-        await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-
-    const connection = joinVoiceChannel({
-        channelId: VOICE_CHANNEL_ID,
-        guildId: SERVER_ID,
-        adapterCreator: client.guilds.cache.get(SERVER_ID).voiceAdapterCreator,
-        selfDeaf: false,
-        selfMute: false
-    });
-
     try {
+        // Destroy any existing connections
+        const existingConnection = getVoiceConnection(SERVER_ID);
+        if (existingConnection) {
+            existingConnection.destroy();
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+
+        const connection = joinVoiceChannel({
+            channelId: VOICE_CHANNEL_ID,
+            guildId: SERVER_ID,
+            adapterCreator: client.guilds.cache.get(SERVER_ID).voiceAdapterCreator,
+            selfDeaf: false,
+            selfMute: false
+        });
+
         await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
         isConnected = true;
         return connection;
     } catch (error) {
-        connection.destroy();
+        console.error('Voice connection error:', error);
         isConnected = false;
-        throw error;
+        return null;
     }
 }
 
@@ -499,30 +493,37 @@ client.on('interactionCreate', async interaction => {
             case 'ytplay':
                 const ytNumber = interaction.options.getInteger('number');
                 
+                // Defer reply immediately before any processing
+                await interaction.deferReply();
+                
                 if (!youtubeSearchResults || youtubeSearchResults.length === 0) {
-                    await interaction.reply('Please search for videos first using /ytsearch');
+                    await interaction.editReply('Please search for videos first using /ytsearch');
                     return;
                 }
 
                 if (ytNumber < 1 || ytNumber > youtubeSearchResults.length) {
-                    await interaction.reply('Invalid video number');
+                    await interaction.editReply('Invalid video number');
                     return;
                 }
 
                 const selectedVideo = youtubeSearchResults[ytNumber - 1];
-                await interaction.deferReply();
                 
                 try {
+                    // Connect to voice channel first
+                    const ytConn = await setupVoiceConnection();
+                    if (!ytConn) {
+                        await interaction.editReply('Failed to connect to voice channel');
+                        return;
+                    }
+
                     await interaction.editReply(`Downloading: ${selectedVideo.title}`);
-                    
                     const filename = sanitizeFilename(selectedVideo.title);
                     const filePath = await downloadYoutubeAudio(selectedVideo.url, filename);
                     
-                    const ytConn = getVoiceConnection(SERVER_ID) || 
-                                 await setupVoiceConnection();
-                    
                     if (await playSpecificSong(`${filename}.mp3`, ytConn)) {
                         await interaction.editReply(`Now playing: ${selectedVideo.title}`);
+                        // Force playlist reload after download
+                        loadPlaylist();
                     } else {
                         await interaction.editReply('Failed to play the video');
                     }
