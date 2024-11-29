@@ -492,8 +492,6 @@ client.on('interactionCreate', async interaction => {
 
             case 'ytplay':
                 const ytNumber = interaction.options.getInteger('number');
-                
-                // Defer reply immediately before any processing
                 await interaction.deferReply();
                 
                 if (!youtubeSearchResults || youtubeSearchResults.length === 0) {
@@ -506,25 +504,41 @@ client.on('interactionCreate', async interaction => {
                     return;
                 }
 
-                const selectedVideo = youtubeSearchResults[ytNumber - 1];
-                
                 try {
-                    // Connect to voice channel first
+                    const selectedVideo = youtubeSearchResults[ytNumber - 1];
+                    console.log('Selected video:', selectedVideo);
+
+                    // Connect to voice first
                     const ytConn = await setupVoiceConnection();
                     if (!ytConn) {
                         await interaction.editReply('Failed to connect to voice channel');
                         return;
                     }
+                    console.log('Voice connection established');
 
                     await interaction.editReply(`Downloading: ${selectedVideo.title}`);
                     const filename = sanitizeFilename(selectedVideo.title);
+                    console.log('Sanitized filename:', filename);
+
                     const filePath = await downloadYoutubeAudio(selectedVideo.url, filename);
-                    
+                    console.log('Download completed, file path:', filePath);
+
+                    // Force playlist reload
+                    loadPlaylist();
+                    console.log('Playlist reloaded');
+
+                    // Verify file exists
+                    if (!fs.existsSync(filePath)) {
+                        console.error('File does not exist after download:', filePath);
+                        await interaction.editReply('Failed to save the downloaded file');
+                        return;
+                    }
+
                     if (await playSpecificSong(`${filename}.mp3`, ytConn)) {
                         await interaction.editReply(`Now playing: ${selectedVideo.title}`);
-                        // Force playlist reload after download
-                        loadPlaylist();
+                        console.log('Started playing:', filename);
                     } else {
+                        console.error('Failed to play the song');
                         await interaction.editReply('Failed to play the video');
                     }
                 } catch (error) {
