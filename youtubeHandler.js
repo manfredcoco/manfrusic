@@ -12,7 +12,7 @@ function ensureMusicDir() {
     }
 }
 
-async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
+async function downloadYoutubeAudio(videoUrl, filename) {
     return new Promise(async (resolve, reject) => {
         console.log('Starting download process for:', filename);
         ensureMusicDir();
@@ -32,22 +32,12 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
             
             console.log('Starting download with format:', format.mimeType);
             const videoStream = ytdl(videoUrl, { format: format });
-            
-            let downloadedBytes = 0;
-            const totalBytes = format.contentLength;
-
-            videoStream.on('progress', (_, downloaded, total) => {
-                const percent = Math.round((downloaded / total) * 100);
-                console.log(`Download: ${percent}% (${Math.round(downloaded/1024/1024)}MB/${Math.round(total/1024/1024)}MB)`);
-                progressCallback(percent);
-            });
 
             const ffmpegProcess = ffmpeg(videoStream)
                 .toFormat('mp3')
                 .audioBitrate('192k')
                 .on('end', () => {
                     console.log('Processing finished');
-                    progressCallback(100);
                     resolve(outputPath);
                 })
                 .on('error', (err) => {

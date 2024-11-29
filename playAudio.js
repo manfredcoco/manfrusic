@@ -77,11 +77,10 @@ function stopCurrentPlayback() {
 
 async function setupVoiceConnection() {
     try {
-        // Destroy any existing connections
+        // Check for existing connection first
         const existingConnection = getVoiceConnection(SERVER_ID);
-        if (existingConnection) {
-            existingConnection.destroy();
-            await new Promise(resolve => setTimeout(resolve, 1000));
+        if (existingConnection && existingConnection.state.status !== VoiceConnectionStatus.Destroyed) {
+            return existingConnection;
         }
 
         const connection = joinVoiceChannel({
@@ -515,41 +514,15 @@ client.on('interactionCreate', async interaction => {
                     }
                     console.log('Voice connection established');
 
-                    const progressMessage = await interaction.editReply(
-                        `Downloading: ${selectedVideo.title}\nProgress: [□□□□□□□□□□] 0%`
-                    );
+                    await interaction.editReply(`Downloading: ${selectedVideo.title}\nPlease wait...`);
 
                     const filename = sanitizeFilename(selectedVideo.title);
                     console.log('Sanitized filename:', filename);
 
-                    const updateProgress = async (percent) => {
-                        try {
-                            const blocks = Math.floor(percent / 10);
-                            const progressBar = '█'.repeat(blocks) + '□'.repeat(10 - blocks);
-                            let status = percent <= 50 ? 'Downloading' : 'Converting';
-                            const message = `${status}: ${selectedVideo.title}\n` +
-                                           `Progress: [${progressBar}] ${percent}%\n` +
-                                           `(${status} in progress...)`;
-                            console.log(`Progress update: ${percent}% (${status})`);
-                            await interaction.editReply(message);
-                        } catch (error) {
-                            console.error('Failed to update progress:', error);
-                        }
-                    };
+                    const outputPath = await downloadYoutubeAudio(selectedVideo.url, filename);
+                    await playAudioFile(outputPath, ytConn);
+                    await interaction.editReply(`Now playing: ${selectedVideo.title}`);
 
-                    const filePath = await downloadYoutubeAudio(selectedVideo.url, filename, updateProgress);
-                    console.log('Download completed, file path:', filePath);
-
-                    loadPlaylist();
-                    console.log('Playlist reloaded');
-
-                    if (await playSpecificSong(`${filename}.mp3`, ytConn)) {
-                        await interaction.editReply(`Now playing: ${selectedVideo.title}`);
-                        console.log('Started playing:', filename);
-                    } else {
-                        console.error('Failed to play the song');
-                        await interaction.editReply('Failed to play the video');
-                    }
                 } catch (error) {
                     console.error('Download/playback error:', error);
                     await interaction.editReply('Failed to download or play the video');
@@ -568,8 +541,16 @@ client.on('interactionCreate', async interaction => {
 
 async function playSpecificSong(songFilename, connection = null) {
     try {
-        if (!connection) {
+        // Only setup connection if we don't have one
+        if (!connection && !getVoiceConnection(SERVER_ID)) {
             connection = await setupVoiceConnection();
+        } else if (!connection) {
+            connection = getVoiceConnection(SERVER_ID);
+        }
+
+        if (currentPlayer) {
+            currentPlayer.removeAllListeners();
+            currentPlayer.stop();
         }
 
         const player = createAudioPlayer({
@@ -591,18 +572,22 @@ async function playSpecificSong(songFilename, connection = null) {
         resource.volume?.setVolume(currentVolume);
         connection.subscribe(player);
 
-        // Add the same event handlers as in startPlayback()
-        connection.on(VoiceConnectionStatus.Disconnected, async () => {
-            try {
-                await Promise.race([
-                    entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
-                    entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
-                ]);
-            } catch (error) {
-                connection.destroy();
-                startPlayback(connection).catch(console.error);
-            }
-        });
+        // Only add disconnection handler if it doesn't exist
+        if (!connection.listeners(VoiceConnectionStatus.Disconnected).length) {
+            connection.on(VoiceConnectionStatus.Disconnected, async () => {
+                try {
+                    await Promise.race([
+                        entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
+                        entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
+                    ]);
+                } catch (error) {
+                    connection.destroy();
+                    if (!isSkipping) {
+                        startPlayback().catch(console.error);
+                    }
+                }
+            });
+        }
 
         player.on(AudioPlayerStatus.Playing, () => {
             console.log('Audio playback started');
@@ -611,7 +596,7 @@ async function playSpecificSong(songFilename, connection = null) {
         player.on(AudioPlayerStatus.Idle, (oldState) => {
             if (oldState.status === AudioPlayerStatus.Playing && !isSkipping) {
                 setTimeout(() => {
-                    if (currentPlayer === player) {  // Check if this is still the current player
+                    if (currentPlayer === player) {
                         console.log('Song finished naturally, playing next song');
                         startPlayback(connection).catch(console.error);
                     }
