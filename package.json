@@ -16,7 +16,8 @@
   "scripts": {
     "start": "node server.js",
     "bot": "node playAudio.js",
-    "webui": "node webui.js"
+    "webui": "node webui.js",
+    "deploy-commands": "node deployCommands.js"
   },
   "author": "",
   "license": "ISC",
