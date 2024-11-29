@@ -30,57 +30,70 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
             console.log('Getting video info from YouTube:', videoUrl);
             const info = await ytdl.getInfo(videoUrl);
             
-            // Specifically request MP3 format
-            const audioFormat = ytdl.chooseFormat(info.formats, {
+            const stream = ytdl(videoUrl, {
                 quality: 'highestaudio',
                 filter: 'audioonly'
             });
 
-            console.log('Audio format selected:', audioFormat.mimeType);
+            // Track download progress
+            stream.on('progress', (_, downloaded, total) => {
+                const percent = Math.min(Math.round((downloaded / total) * 50), 50);
+                console.log(`Download progress: ${percent}% (${Math.round(downloaded/1024/1024)}MB/${Math.round(total/1024/1024)}MB)`);
+                progressCallback(percent);
+            });
+
+            // Track any errors
+            stream.on('error', (error) => {
+                console.error('Download error:', error);
+                reject(error);
+            });
+
+            console.log('Starting download...');
             
-            let downloadedBytes = 0;
-            const totalBytes = parseInt(audioFormat.contentLength);
+            // First download to temp file
             const writeStream = fs.createWriteStream(tempFile);
+            stream.pipe(writeStream);
 
-            const stream = ytdl.downloadFromInfo(info, { format: audioFormat })
-                .on('data', chunk => {
-                    downloadedBytes += chunk.length;
-                    const percent = Math.min(Math.round((downloadedBytes / totalBytes) * 100), 50);
-                    console.log(`Download: ${percent}% (${Math.round(downloadedBytes/1024/1024)}MB/${Math.round(totalBytes/1024/1024)}MB)`);
-                    progressCallback(percent);
-                })
-                .pipe(writeStream);
-
+            // Wait for download to complete
             await new Promise((resolve, reject) => {
                 writeStream.on('finish', resolve);
-                writeStream.on('error', reject);
+                writeStream.on('error', (error) => {
+                    console.error('Write stream error:', error);
+                    reject(error);
+                });
             });
 
             console.log('Download completed, starting conversion');
             progressCallback(50);
 
+            // Convert to MP3
             await new Promise((resolve, reject) => {
                 ffmpeg(tempFile)
                     .toFormat('mp3')
                     .audioCodec('libmp3lame')
                     .audioBitrate('192k')
-                    .on('progress', progress => {
-                        if (progress.percent) {
-                            const percent = Math.min(50 + Math.round(progress.percent / 2), 100);
-                            console.log(`Converting: ${progress.percent}% (Total: ${percent}%)`);
-                            progressCallback(percent);
-                        }
+                    .on('progress', (progress) => {
+                        const percent = Math.min(50 + Math.round(progress.percent / 2), 100);
+                        console.log(`Converting: ${progress.percent}% (Total: ${percent}%)`);
+                        progressCallback(percent);
                     })
                     .on('end', () => {
-                        fs.unlink(tempFile, () => {});
+                        console.log('Conversion completed');
                         resolve();
                     })
-                    .on('error', error => {
-                        fs.unlink(tempFile, () => {});
+                    .on('error', (error) => {
+                        console.error('Conversion error:', error);
                         reject(error);
                     })
                     .save(outputPath);
             });
+
+            // Clean up temp file
+            try {
+                fs.unlinkSync(tempFile);
+            } catch (error) {
+                console.error('Failed to delete temp file:', error);
+            }
 
             if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
                 console.log('File successfully saved:', outputPath);
@@ -92,9 +105,14 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
 
         } catch (error) {
             console.error('Error in download process:', error);
+            // Clean up any partial files
             [outputPath, tempFile].forEach(file => {
                 if (fs.existsSync(file)) {
-                    fs.unlinkSync(file);
+                    try {
+                        fs.unlinkSync(file);
+                    } catch (e) {
+                        console.error('Failed to delete file:', file, e);
+                    }
                 }
             });
             reject(error);
