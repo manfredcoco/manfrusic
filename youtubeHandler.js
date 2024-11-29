@@ -1,10 +1,9 @@
-const ytdl = require('ytdl-core');
+const play = require('play-dl');
 const yts = require('yt-search');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
 
-let lastSearchResults = [];
 const MUSIC_DIR = path.join(__dirname, 'music');
 
 async function searchYoutube(query) {
@@ -32,29 +31,11 @@ async function downloadYoutubeAudio(videoUrl, filename) {
         }
 
         try {
-            const info = await ytdl.getInfo(videoUrl);
-            const format = ytdl.chooseFormat(info.formats, { 
-                quality: 'highestaudio',
-                filter: 'audioonly'
+            const stream = await play.stream(videoUrl, { 
+                discordPlayerCompatibility: true 
             });
 
-            const stream = ytdl.downloadFromInfo(info, { 
-                format: format,
-                requestOptions: {
-                    headers: {
-                        cookie: process.env.YOUTUBE_COOKIE || '',
-                        'x-youtube-identity-token': process.env.YOUTUBE_IDENTITY || '',
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                    }
-                }
-            });
-
-            stream.on('error', (error) => {
-                console.error('YouTube download error:', error);
-                reject(error);
-            });
-
-            ffmpeg(stream)
+            ffmpeg(stream.stream)
                 .audioBitrate(128)
                 .toFormat('mp3')
                 .on('error', (error) => {
@@ -68,21 +49,13 @@ async function downloadYoutubeAudio(videoUrl, filename) {
                 .save(outputPath);
 
         } catch (error) {
-            console.error('Error getting video info:', error);
+            console.error('Error downloading video:', error);
             reject(error);
         }
     });
 }
 
-function sanitizeFilename(filename) {
-    return filename
-        .replace(/[^a-z0-9]/gi, '_')
-        .toLowerCase()
-        .substring(0, 200);
-}
-
 module.exports = {
     searchYoutube,
-    downloadYoutubeAudio,
-    lastSearchResults
+    downloadYoutubeAudio
 }; 
