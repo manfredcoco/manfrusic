@@ -23,7 +23,7 @@ async function searchYoutube(query) {
 }
 
 async function downloadYoutubeAudio(videoUrl, filename) {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
         const outputPath = path.join(MUSIC_DIR, `${filename}.mp3`);
         
         if (fs.existsSync(outputPath)) {
@@ -31,36 +31,46 @@ async function downloadYoutubeAudio(videoUrl, filename) {
             return;
         }
 
-        const stream = ytdl(videoUrl, {
-            quality: 'highestaudio',
-            filter: 'audioonly',
-            requestOptions: {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': '*/*',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Range': 'bytes=0-'
+        try {
+            const info = await ytdl.getInfo(videoUrl);
+            const format = ytdl.chooseFormat(info.formats, { 
+                quality: 'highestaudio',
+                filter: 'audioonly'
+            });
+
+            const stream = ytdl.downloadFromInfo(info, { 
+                format: format,
+                requestOptions: {
+                    headers: {
+                        cookie: process.env.YOUTUBE_COOKIE || '',
+                        'x-youtube-identity-token': process.env.YOUTUBE_IDENTITY || '',
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    }
                 }
-            }
-        });
+            });
 
-        stream.on('error', (error) => {
-            console.error('YouTube download error:', error);
-            reject(error);
-        });
-
-        ffmpeg(stream)
-            .audioBitrate(128)
-            .toFormat('mp3')
-            .on('error', (error) => {
-                console.error('FFmpeg error:', error);
+            stream.on('error', (error) => {
+                console.error('YouTube download error:', error);
                 reject(error);
-            })
-            .on('end', () => {
-                console.log('Download completed:', filename);
-                resolve(outputPath);
-            })
-            .save(outputPath);
+            });
+
+            ffmpeg(stream)
+                .audioBitrate(128)
+                .toFormat('mp3')
+                .on('error', (error) => {
+                    console.error('FFmpeg error:', error);
+                    reject(error);
+                })
+                .on('end', () => {
+                    console.log('Download completed:', filename);
+                    resolve(outputPath);
+                })
+                .save(outputPath);
+
+        } catch (error) {
+            console.error('Error getting video info:', error);
+            reject(error);
+        }
     });
 }
 
