@@ -5,79 +5,200 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Music Upload</title>
     <style>
+        :root {
+            --primary-color: #4CAF50;
+            --danger-color: #ff4444;
+            --bg-color: #f5f5f5;
+            --card-bg: #ffffff;
+            --text-color: #333333;
+            --border-color: #e0e0e0;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.6;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1200px;
             margin: 0 auto;
-            padding: 20px;
-            background-color: #f0f0f0;
         }
-        .upload-container {
-            background-color: white;
-            padding: 20px;
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        h2 {
+            color: var(--text-color);
+            margin-bottom: 1.5rem;
+            font-weight: 600;
+        }
+
+        .upload-zone {
+            border: 2px dashed var(--border-color);
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
+            padding: 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 1rem;
         }
+
+        .upload-zone:hover, .upload-zone.dragover {
+            border-color: var(--primary-color);
+            background-color: rgba(76, 175, 80, 0.1);
+        }
+
+        .upload-zone i {
+            font-size: 3rem;
+            color: var(--primary-color);
+            margin-bottom: 1rem;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .upload-btn {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 0.8rem 1.5rem;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background-color 0.3s ease;
+        }
+
+        .upload-btn:hover {
+            background-color: #45a049;
+        }
+
         .file-list {
-            background-color: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-top: 2rem;
         }
+
         .file-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 10px;
-            border-bottom: 1px solid #eee;
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            transition: background-color 0.3s ease;
         }
+
+        .file-item:hover {
+            background-color: rgba(0, 0, 0, 0.02);
+        }
+
         .delete-btn {
-            background-color: #ff4444;
+            background-color: var(--danger-color);
             color: white;
             border: none;
-            padding: 5px 10px;
+            padding: 0.5rem 1rem;
             border-radius: 4px;
             cursor: pointer;
+            transition: background-color 0.3s ease;
         }
-        .upload-btn {
-            background-color: #4CAF50;
-            color: white;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
+
+        .delete-btn:hover {
+            background-color: #ff3333;
         }
+
         #message {
-            margin-top: 10px;
-            padding: 10px;
-            border-radius: 4px;
+            padding: 1rem;
+            border-radius: 6px;
+            margin: 1rem 0;
+            display: none;
         }
-        .success { background-color: #dff0d8; color: #3c763d; }
-        .error { background-color: #f2dede; color: #a94442; }
+
+        .success {
+            background-color: #dff0d8;
+            color: #3c763d;
+            border: 1px solid #d6e9c6;
+        }
+
+        .error {
+            background-color: #f2dede;
+            color: #a94442;
+            border: 1px solid #ebccd1;
+        }
+
+        .upload-progress {
+            width: 100%;
+            height: 4px;
+            background-color: var(--border-color);
+            border-radius: 2px;
+            margin-top: 1rem;
+            overflow: hidden;
+            display: none;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background-color: var(--primary-color);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
     </style>
 </head>
 <body>
-    <div class="upload-container">
-        <h2>Upload MP3 Files</h2>
-        <form id="uploadForm">
-            <input type="file" accept=".mp3" name="mp3File" required>
-            <button type="submit" class="upload-btn">Upload</button>
-        </form>
-        <div id="message"></div>
-    </div>
+    <div class="container">
+        <div class="card">
+            <h2>Upload MP3 Files</h2>
+            <div id="uploadZone" class="upload-zone">
+                <i>📁</i>
+                <p>Drag and drop MP3 files here or click to select files</p>
+                <input type="file" id="fileInput" class="file-input" accept=".mp3" multiple>
+            </div>
+            <div class="upload-progress">
+                <div class="progress-bar"></div>
+            </div>
+            <div id="message"></div>
+        </div>
 
-    <div class="file-list">
-        <h2>Current Files</h2>
-        <div id="fileList"></div>
+        <div class="card">
+            <h2>Current Files</h2>
+            <div id="fileList"></div>
+        </div>
     </div>
 
     <script>
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+        const progressBar = document.querySelector('.progress-bar');
+        const progressContainer = document.querySelector('.upload-progress');
+
         function showMessage(text, isError = false) {
             const message = document.getElementById('message');
             message.textContent = text;
             message.className = isError ? 'error' : 'success';
-            setTimeout(() => message.textContent = '', 3000);
+            message.style.display = 'block';
+            setTimeout(() => message.style.display = 'none', 3000);
+        }
+
+        function updateProgress(percent) {
+            progressContainer.style.display = 'block';
+            progressBar.style.width = `${percent}%`;
+            if (percent >= 100) {
+                setTimeout(() => {
+                    progressContainer.style.display = 'none';
+                    progressBar.style.width = '0%';
+                }, 1000);
+            }
         }
 
         function loadFiles() {
@@ -85,13 +206,48 @@
                 .then(response => response.json())
                 .then(files => {
                     const fileList = document.getElementById('fileList');
-                    fileList.innerHTML = files.map(file => `
-                        <div class="file-item">
+                    if (files.length === 0) {
+                        fileList.innerHTML = '<p style="text-align: center; color: #666;">No files uploaded yet</p>';
+                        return;
+                    }
+                    fileList.innerHTML = files.map(file => 
+                        `<div class="file-item">
                             <span>${file}</span>
-                            <button class="delete-btn" onclick="deleteFile('${file}')">Delete</button>
-                        </div>
-                    `).join('');
+                            <button class="delete-btn" onclick="deleteFile(\`${file}\`)">Delete</button>
+                        </div>`
+                    ).join('');
                 });
+        }
+
+        async function uploadFiles(files) {
+            const totalFiles = files.length;
+            let uploadedFiles = 0;
+
+            for (const file of files) {
+                const formData = new FormData();
+                formData.append('mp3File', file);
+
+                try {
+                    const response = await fetch('/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (response.ok) {
+                        uploadedFiles++;
+                        updateProgress((uploadedFiles / totalFiles) * 100);
+                    } else {
+                        showMessage(`Failed to upload ${file.name}`, true);
+                    }
+                } catch (error) {
+                    showMessage(`Error uploading ${file.name}`, true);
+                }
+            }
+
+            if (uploadedFiles === totalFiles) {
+                showMessage(`Successfully uploaded ${uploadedFiles} files`);
+                loadFiles();
+            }
         }
 
         function deleteFile(filename) {
@@ -106,24 +262,38 @@
                 });
         }
 
-        document.getElementById('uploadForm').onsubmit = function(e) {
+        // Drag and drop handlers
+        uploadZone.addEventListener('dragover', (e) => {
             e.preventDefault();
-            const formData = new FormData(this);
-            
-            fetch('/upload', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => {
-                if (response.ok) {
-                    showMessage('File uploaded successfully');
-                    this.reset();
-                    loadFiles();
-                } else {
-                    showMessage('Upload failed', true);
-                }
-            });
-        };
+            uploadZone.classList.add('dragover');
+        });
+
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.classList.remove('dragover');
+        });
+
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            const files = Array.from(e.dataTransfer.files).filter(file => file.name.endsWith('.mp3'));
+            if (files.length > 0) {
+                uploadFiles(files);
+            } else {
+                showMessage('Please drop only MP3 files', true);
+            }
+        });
+
+        // Click to upload
+        uploadZone.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', () => {
+            const files = Array.from(fileInput.files);
+            if (files.length > 0) {
+                uploadFiles(files);
+            }
+        });
 
         // Load files on page load
         loadFiles();

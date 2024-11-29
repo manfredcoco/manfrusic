@@ -42,7 +42,7 @@ app.post('/upload', upload.single('mp3File'), (req, res) => {
     if (!req.file) {
         return res.status(400).send('No file uploaded.');
     }
-    res.send('File uploaded successfully!');
+    res.status(200).send('File uploaded successfully!');
 });
 
 // Get list of music files
