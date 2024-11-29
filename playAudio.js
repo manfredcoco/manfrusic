@@ -102,10 +102,20 @@ function initializeSearch() {
 }
 
 function loadPlaylist() {
+    // Create music directory if it doesn't exist
+    if (!fs.existsSync(MUSIC_DIR)) {
+        fs.mkdirSync(MUSIC_DIR);
+    }
+
     playlist = fs.readdirSync(MUSIC_DIR)
         .filter(file => file.endsWith('.mp3'));
-    shufflePlaylist();
-    initializeSearch();
+    
+    if (playlist.length > 0) {
+        shufflePlaylist();
+        initializeSearch();
+    } else {
+        console.log('No MP3 files found in music directory');
+    }
 }
 
 function shufflePlaylist() {
@@ -136,7 +146,14 @@ async function startPlayback(initialConnection = null) {
         const connection = initialConnection || await setupVoiceConnection();
 
         // Get random song from playlist
-        if (playlist.length === 0) loadPlaylist();
+        if (playlist.length === 0) {
+            loadPlaylist();
+            if (playlist.length === 0) {
+                console.log('No MP3 files found in music directory');
+                message.reply('No songs available. Please add some MP3 files first.');
+                return;
+            }
+        }
         const songPath = join(MUSIC_DIR, playlist[0]);
         playlist.push(playlist.shift()); // Move first song to end
 
