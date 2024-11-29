@@ -526,7 +526,9 @@ client.on('interactionCreate', async interaction => {
                         try {
                             const blocks = Math.floor(percent / 10);
                             const progressBar = '█'.repeat(blocks) + '□'.repeat(10 - blocks);
-                            const message = `Downloading: ${selectedVideo.title}\nProgress: [${progressBar}] ${percent}%`;
+                            const message = `Downloading: ${selectedVideo.title}\n` +
+                                           `Progress: [${progressBar}] ${percent}%\n` +
+                                           `(This may take a minute...)`;
                             console.log(`Progress update: ${percent}%`);
                             await interaction.editReply(message);
                         } catch (error) {

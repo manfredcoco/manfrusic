@@ -1,5 +1,4 @@
-const play = require('play-dl');
-const yts = require('yt-search');
+const ytdl = require('ytdl-core');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
@@ -26,42 +25,30 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
         }
 
         try {
-            console.log('Getting stream from YouTube:', videoUrl);
-            const yt_info = await play.video_info(videoUrl);
-            const stream = await play.stream_from_info(yt_info, {
-                quality: 2,
-                discordPlayerCompatibility: true
-            });
+            console.log('Getting video info from YouTube:', videoUrl);
+            const info = await ytdl.getInfo(videoUrl);
+            const format = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
+            
+            let downloadedBytes = 0;
+            const totalBytes = format.contentLength;
+            console.log('Total file size:', Math.round(totalBytes / 1024 / 1024), 'MB');
 
-            // Get video duration in seconds
-            const duration = yt_info.video_details.durationInSec;
-            console.log('Video duration:', duration, 'seconds');
+            const stream = ytdl.downloadFromInfo(info, { format: format })
+                .on('progress', (_, downloaded, total) => {
+                    downloadedBytes = downloaded;
+                    const percent = Math.round((downloaded / total) * 100);
+                    console.log(`Download progress: ${percent}% (${Math.round(downloaded/1024/1024)}MB/${Math.round(total/1024/1024)}MB)`);
+                    progressCallback(percent);
+                });
 
             console.log('Starting FFmpeg conversion');
             let startTime = Date.now();
-            let lastProgress = 0;
 
-            const ffmpegProcess = ffmpeg(stream.stream)
+            ffmpeg(stream)
                 .audioBitrate(96)
                 .toFormat('mp3')
                 .on('start', () => {
                     console.log('FFmpeg started processing');
-                    progressCallback(0);
-                })
-                .on('progress', (progress) => {
-                    // Calculate progress based on timestamp
-                    if (progress.timemark) {
-                        const time = progress.timemark.split(':');
-                        const seconds = (+time[0]) * 60 * 60 + (+time[1]) * 60 + (+time[2]);
-                        const percent = Math.min(Math.round((seconds / duration) * 100), 100);
-                        
-                        // Only update if progress has changed
-                        if (percent !== lastProgress) {
-                            console.log(`Processing: ${percent}% done (${progress.timemark} / ${duration}s)`);
-                            progressCallback(percent);
-                            lastProgress = percent;
-                        }
-                    }
                 })
                 .on('error', (error) => {
                     console.error('FFmpeg error:', error);
@@ -72,8 +59,7 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
                 })
                 .on('end', () => {
                     const duration = (Date.now() - startTime) / 1000;
-                    console.log(`Download completed: ${filename} (${duration.toFixed(2)}s)`);
-                    progressCallback(100);
+                    console.log(`Conversion completed: ${filename} (${duration.toFixed(2)}s)`);
                     
                     if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
                         console.log('File successfully saved:', outputPath);
