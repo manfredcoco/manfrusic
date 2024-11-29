@@ -83,7 +83,6 @@ function initializeSearch() {
     // Create searchable items with both filename and cleaned name
     const searchItems = playlist.map(filename => ({
         filename,
-        // Convert "Artist - Song Name.mp3" or "Song_Name.mp3" to readable format
         cleanName: filename
             .replace('.mp3', '')
             .replace(/_/g, ' ')
@@ -98,7 +97,8 @@ function initializeSearch() {
         minMatchCharLength: 2
     };
 
-    fuseSearch = new Fuse(searchItems, options);
+    // Initialize with empty array if no items
+    fuseSearch = new Fuse(searchItems.length > 0 ? searchItems : [{ filename: '', cleanName: '' }], options);
 }
 
 function loadPlaylist() {
@@ -110,12 +110,8 @@ function loadPlaylist() {
     playlist = fs.readdirSync(MUSIC_DIR)
         .filter(file => file.endsWith('.mp3'));
     
-    if (playlist.length > 0) {
-        shufflePlaylist();
-        initializeSearch();
-    } else {
-        console.log('No MP3 files found in music directory');
-    }
+    // Initialize fuseSearch even with empty playlist
+    initializeSearch();
 }
 
 function shufflePlaylist() {
@@ -339,6 +335,11 @@ client.on('messageCreate', async (message) => {
         case '!search':
             if (args.length === 0) {
                 message.reply('Please provide a search term');
+                return;
+            }
+            
+            if (playlist.length === 0) {
+                message.reply('No songs available. Please add some MP3 files first.');
                 return;
             }
             
