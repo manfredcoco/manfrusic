@@ -28,67 +28,83 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
         try {
             console.log('Getting video info from YouTube:', videoUrl);
             const info = await ytdl.getInfo(videoUrl);
-            const audioFormat = info.formats.find(format => format.mimeType.includes('audio/mp4'));
             
+            // Get the audio-only format
+            const audioFormat = ytdl.filterFormats(info.formats, 'audioonly')[0];
             if (!audioFormat) {
-                throw new Error('No suitable audio format found');
+                throw new Error('No audio format found');
             }
 
-            console.log('Starting download with format:', audioFormat.mimeType);
-            const stream = ytdl.downloadFromInfo(info, { format: audioFormat });
+            console.log('Audio format selected:', audioFormat.mimeType);
             
-            let totalBytes = parseInt(audioFormat.contentLength);
+            // Create temporary file for download progress tracking
+            const tempFile = path.join(MUSIC_DIR, `${filename}.temp`);
+            const writeStream = fs.createWriteStream(tempFile);
+            
             let downloadedBytes = 0;
+            const totalBytes = parseInt(audioFormat.contentLength);
+            console.log('Expected file size:', Math.round(totalBytes/1024/1024), 'MB');
 
-            stream.on('data', chunk => {
-                downloadedBytes += chunk.length;
-                if (totalBytes) {
-                    const percent = Math.round((downloadedBytes / totalBytes) * 100);
+            const stream = ytdl.downloadFromInfo(info, { format: audioFormat })
+                .on('data', chunk => {
+                    downloadedBytes += chunk.length;
+                    const percent = Math.min(Math.round((downloadedBytes / totalBytes) * 100), 100);
                     console.log(`Download: ${percent}% (${Math.round(downloadedBytes/1024/1024)}MB/${Math.round(totalBytes/1024/1024)}MB)`);
                     progressCallback(percent);
-                }
+                })
+                .pipe(writeStream);
+
+            // Wait for download to complete
+            await new Promise((resolve, reject) => {
+                writeStream.on('finish', resolve);
+                writeStream.on('error', reject);
             });
 
-            console.log('Starting FFmpeg conversion');
-            let startTime = Date.now();
+            console.log('Download completed, starting conversion');
+            progressCallback(50); // Mark 50% at conversion start
 
-            const ffmpegProcess = ffmpeg(stream)
-                .audioCodec('libmp3lame')
-                .audioBitrate('128k')
-                .format('mp3')
-                .on('start', () => {
-                    console.log('FFmpeg conversion started');
-                })
-                .on('progress', progress => {
-                    console.log('FFmpeg progress:', progress);
-                })
-                .on('error', (error) => {
-                    console.error('FFmpeg error:', error);
-                    if (fs.existsSync(outputPath)) {
-                        fs.unlinkSync(outputPath);
-                    }
-                    reject(error);
-                })
-                .on('end', () => {
-                    const duration = (Date.now() - startTime) / 1000;
-                    console.log(`Conversion completed: ${filename} (${duration.toFixed(2)}s)`);
-                    
-                    if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
-                        console.log('File successfully saved:', outputPath);
-                        resolve(outputPath);
-                    } else {
-                        reject(new Error('File was not created successfully'));
-                    }
-                });
+            // Convert the temp file to MP3
+            await new Promise((resolve, reject) => {
+                ffmpeg(tempFile)
+                    .audioCodec('libmp3lame')
+                    .audioBitrate('128k')
+                    .format('mp3')
+                    .on('progress', progress => {
+                        if (progress.percent) {
+                            const percent = Math.min(50 + Math.round(progress.percent / 2), 100);
+                            console.log(`Converting: ${progress.percent}% (Total: ${percent}%)`);
+                            progressCallback(percent);
+                        }
+                    })
+                    .on('end', () => {
+                        console.log('Conversion completed');
+                        // Clean up temp file
+                        fs.unlink(tempFile, () => {});
+                        resolve();
+                    })
+                    .on('error', (error) => {
+                        console.error('FFmpeg error:', error);
+                        reject(error);
+                    })
+                    .save(outputPath);
+            });
 
-            // Pipe to output file
-            ffmpegProcess.save(outputPath);
+            if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+                console.log('File successfully saved:', outputPath);
+                progressCallback(100);
+                resolve(outputPath);
+            } else {
+                throw new Error('File was not created successfully');
+            }
 
         } catch (error) {
             console.error('Error in download process:', error);
-            if (fs.existsSync(outputPath)) {
-                fs.unlinkSync(outputPath);
-            }
+            // Clean up any partial files
+            [outputPath, tempFile].forEach(file => {
+                if (fs.existsSync(file)) {
+                    fs.unlinkSync(file);
+                }
+            });
             reject(error);
         }
     });

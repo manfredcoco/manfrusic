@@ -526,10 +526,11 @@ client.on('interactionCreate', async interaction => {
                         try {
                             const blocks = Math.floor(percent / 10);
                             const progressBar = '█'.repeat(blocks) + '□'.repeat(10 - blocks);
-                            const message = `Downloading: ${selectedVideo.title}\n` +
+                            let status = percent <= 50 ? 'Downloading' : 'Converting';
+                            const message = `${status}: ${selectedVideo.title}\n` +
                                            `Progress: [${progressBar}] ${percent}%\n` +
-                                           `(This may take a minute...)`;
-                            console.log(`Progress update: ${percent}%`);
+                                           `(${status} in progress...)`;
+                            console.log(`Progress update: ${percent}% (${status})`);
                             await interaction.editReply(message);
                         } catch (error) {
                             console.error('Failed to update progress:', error);
