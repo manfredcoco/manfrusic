@@ -28,28 +28,39 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
         try {
             console.log('Getting video info from YouTube:', videoUrl);
             const info = await ytdl.getInfo(videoUrl);
-            const format = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
+            const audioFormat = info.formats.find(format => format.mimeType.includes('audio/mp4'));
             
-            let downloadedBytes = 0;
-            const totalBytes = format.contentLength;
-            console.log('Total file size:', Math.round(totalBytes / 1024 / 1024), 'MB');
+            if (!audioFormat) {
+                throw new Error('No suitable audio format found');
+            }
 
-            const stream = ytdl.downloadFromInfo(info, { format: format })
-                .on('progress', (_, downloaded, total) => {
-                    downloadedBytes = downloaded;
-                    const percent = Math.round((downloaded / total) * 100);
-                    console.log(`Download progress: ${percent}% (${Math.round(downloaded/1024/1024)}MB/${Math.round(total/1024/1024)}MB)`);
+            console.log('Starting download with format:', audioFormat.mimeType);
+            const stream = ytdl.downloadFromInfo(info, { format: audioFormat });
+            
+            let totalBytes = parseInt(audioFormat.contentLength);
+            let downloadedBytes = 0;
+
+            stream.on('data', chunk => {
+                downloadedBytes += chunk.length;
+                if (totalBytes) {
+                    const percent = Math.round((downloadedBytes / totalBytes) * 100);
+                    console.log(`Download: ${percent}% (${Math.round(downloadedBytes/1024/1024)}MB/${Math.round(totalBytes/1024/1024)}MB)`);
                     progressCallback(percent);
-                });
+                }
+            });
 
             console.log('Starting FFmpeg conversion');
             let startTime = Date.now();
 
-            ffmpeg(stream)
-                .audioBitrate(96)
-                .toFormat('mp3')
+            const ffmpegProcess = ffmpeg(stream)
+                .audioCodec('libmp3lame')
+                .audioBitrate('128k')
+                .format('mp3')
                 .on('start', () => {
-                    console.log('FFmpeg started processing');
+                    console.log('FFmpeg conversion started');
+                })
+                .on('progress', progress => {
+                    console.log('FFmpeg progress:', progress);
                 })
                 .on('error', (error) => {
                     console.error('FFmpeg error:', error);
@@ -68,8 +79,10 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
                     } else {
                         reject(new Error('File was not created successfully'));
                     }
-                })
-                .save(outputPath);
+                });
+
+            // Pipe to output file
+            ffmpegProcess.save(outputPath);
 
         } catch (error) {
             console.error('Error in download process:', error);
