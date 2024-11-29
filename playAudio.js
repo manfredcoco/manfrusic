@@ -525,9 +525,13 @@ client.on('interactionCreate', async interaction => {
                     const updateProgress = async (percent) => {
                         const blocks = Math.floor(percent / 10);
                         const progressBar = '█'.repeat(blocks) + '□'.repeat(10 - blocks);
-                        await interaction.editReply(
-                            `Downloading: ${selectedVideo.title}\nProgress: [${progressBar}] ${percent}%`
-                        );
+                        const message = `Downloading: ${selectedVideo.title}\nProgress: [${progressBar}] ${percent}%`;
+                        console.log(`Progress update: ${percent}%`);
+                        try {
+                            await interaction.editReply(message);
+                        } catch (error) {
+                            console.error('Failed to update progress:', error);
+                        }
                     };
 
                     const filePath = await downloadYoutubeAudio(selectedVideo.url, filename, updateProgress);
