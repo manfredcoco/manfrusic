@@ -520,6 +520,11 @@ client.on('interactionCreate', async interaction => {
                     console.log('Sanitized filename:', filename);
 
                     const outputPath = await downloadYoutubeAudio(selectedVideo.url, filename);
+                    // Reload playlist after download
+                    loadPlaylist();
+                    // Initialize search after updating playlist
+                    initializeSearch();
+                    
                     const success = await playSpecificSong(`${filename}.mp3`, ytConn);
                     
                     if (success) {
