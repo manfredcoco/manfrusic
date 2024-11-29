@@ -125,7 +125,7 @@ function shufflePlaylist() {
     }
 }
 
-async function startPlayback(initialConnection = null) {
+async function startPlayback(initialConnection = null, message = null) {
     try {
         if (currentPlayer) {
             currentPlayer.removeAllListeners();
@@ -150,7 +150,9 @@ async function startPlayback(initialConnection = null) {
             loadPlaylist();
             if (playlist.length === 0) {
                 console.log('No MP3 files found in music directory');
-                message.reply('No songs available. Please add some MP3 files first.');
+                if (message) {
+                    message.reply('No songs available. Please add some MP3 files first.');
+                }
                 return;
             }
         }
@@ -195,7 +197,7 @@ async function startPlayback(initialConnection = null) {
             console.log('Song finished, playing next song');
             if (!isSkipping) {
                 setTimeout(() => {
-                    startPlayback(connection).catch(console.error);
+                    startPlayback(connection, message).catch(console.error);
                 }, 1000);
             }
         });
@@ -290,7 +292,7 @@ client.on('messageCreate', async (message) => {
                 const connection = await setupVoiceConnection();
                 console.log('Connection established');
                 loadPlaylist();
-                await startPlayback(connection);
+                await startPlayback(connection, message);
                 message.reply('Connected and started playlist!');
             } catch (error) {
                 console.error('Connect error:', error);
@@ -324,7 +326,7 @@ client.on('messageCreate', async (message) => {
                 }
                 isSkipping = true;
                 currentPlayer.stop();
-                await startPlayback(connection);
+                await startPlayback(connection, message);
                 message.reply('Skipped to next song!');
             } catch (error) {
                 console.error('Skip error:', error);
