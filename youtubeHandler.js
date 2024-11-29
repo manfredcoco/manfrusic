@@ -12,7 +12,7 @@ function ensureMusicDir() {
     }
 }
 
-async function downloadYoutubeAudio(videoUrl, filename) {
+async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
     return new Promise(async (resolve, reject) => {
         console.log('Starting download process for:', filename);
         ensureMusicDir();
@@ -29,7 +29,7 @@ async function downloadYoutubeAudio(videoUrl, filename) {
             console.log('Getting stream from YouTube:', videoUrl);
             const yt_info = await play.video_info(videoUrl);
             const stream = await play.stream_from_info(yt_info, {
-                quality: 2, // Try a lower quality
+                quality: 2,
                 discordPlayerCompatibility: true
             });
 
@@ -37,14 +37,17 @@ async function downloadYoutubeAudio(videoUrl, filename) {
             let startTime = Date.now();
 
             const ffmpegProcess = ffmpeg(stream.stream)
-                .audioBitrate(96) // Lower bitrate
+                .audioBitrate(96)
                 .toFormat('mp3')
                 .on('start', () => {
                     console.log('FFmpeg started processing');
+                    progressCallback(0);
                 })
                 .on('progress', (progress) => {
                     if (progress.percent) {
-                        console.log(`Processing: ${Math.round(progress.percent)}% done`);
+                        const percent = Math.round(progress.percent);
+                        console.log(`Processing: ${percent}% done`);
+                        progressCallback(percent);
                     }
                 })
                 .on('error', (error) => {
@@ -57,6 +60,7 @@ async function downloadYoutubeAudio(videoUrl, filename) {
                 .on('end', () => {
                     const duration = (Date.now() - startTime) / 1000;
                     console.log(`Download completed: ${filename} (${duration.toFixed(2)}s)`);
+                    progressCallback(100);
                     
                     if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
                         console.log('File successfully saved:', outputPath);
@@ -64,17 +68,8 @@ async function downloadYoutubeAudio(videoUrl, filename) {
                     } else {
                         reject(new Error('File was not created successfully'));
                     }
-                });
-
-            // Set a more generous timeout
-            const timeout = setTimeout(() => {
-                ffmpegProcess.kill();
-                reject(new Error('FFmpeg process timed out'));
-            }, 120000); // 2 minutes
-
-            ffmpegProcess
-                .save(outputPath)
-                .on('end', () => clearTimeout(timeout));
+                })
+                .save(outputPath);
 
         } catch (error) {
             console.error('Error in download process:', error);

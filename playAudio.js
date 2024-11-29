@@ -508,7 +508,6 @@ client.on('interactionCreate', async interaction => {
                     const selectedVideo = youtubeSearchResults[ytNumber - 1];
                     console.log('Selected video:', selectedVideo);
 
-                    // Connect to voice first
                     const ytConn = await setupVoiceConnection();
                     if (!ytConn) {
                         await interaction.editReply('Failed to connect to voice channel');
@@ -516,23 +515,26 @@ client.on('interactionCreate', async interaction => {
                     }
                     console.log('Voice connection established');
 
-                    await interaction.editReply(`Downloading: ${selectedVideo.title}`);
+                    const progressMessage = await interaction.editReply(
+                        `Downloading: ${selectedVideo.title}\nProgress: [□□□□□□□□□□] 0%`
+                    );
+
                     const filename = sanitizeFilename(selectedVideo.title);
                     console.log('Sanitized filename:', filename);
 
-                    const filePath = await downloadYoutubeAudio(selectedVideo.url, filename);
+                    const updateProgress = async (percent) => {
+                        const blocks = Math.floor(percent / 10);
+                        const progressBar = '█'.repeat(blocks) + '□'.repeat(10 - blocks);
+                        await interaction.editReply(
+                            `Downloading: ${selectedVideo.title}\nProgress: [${progressBar}] ${percent}%`
+                        );
+                    };
+
+                    const filePath = await downloadYoutubeAudio(selectedVideo.url, filename, updateProgress);
                     console.log('Download completed, file path:', filePath);
 
-                    // Force playlist reload
                     loadPlaylist();
                     console.log('Playlist reloaded');
-
-                    // Verify file exists
-                    if (!fs.existsSync(filePath)) {
-                        console.error('File does not exist after download:', filePath);
-                        await interaction.editReply('Failed to save the downloaded file');
-                        return;
-                    }
 
                     if (await playSpecificSong(`${filename}.mp3`, ytConn)) {
                         await interaction.editReply(`Now playing: ${selectedVideo.title}`);
