@@ -18,6 +18,7 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
         ensureMusicDir();
         
         const outputPath = path.join(MUSIC_DIR, `${filename}.mp3`);
+        const tempFile = path.join(MUSIC_DIR, `${filename}.temp`);
         
         if (fs.existsSync(outputPath)) {
             console.log('File already exists:', outputPath);
@@ -29,46 +30,40 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
             console.log('Getting video info from YouTube:', videoUrl);
             const info = await ytdl.getInfo(videoUrl);
             
-            // Get the audio-only format
-            const audioFormat = ytdl.filterFormats(info.formats, 'audioonly')[0];
-            if (!audioFormat) {
-                throw new Error('No audio format found');
-            }
+            // Specifically request MP3 format
+            const audioFormat = ytdl.chooseFormat(info.formats, {
+                quality: 'highestaudio',
+                filter: 'audioonly'
+            });
 
             console.log('Audio format selected:', audioFormat.mimeType);
             
-            // Create temporary file for download progress tracking
-            const tempFile = path.join(MUSIC_DIR, `${filename}.temp`);
-            const writeStream = fs.createWriteStream(tempFile);
-            
             let downloadedBytes = 0;
             const totalBytes = parseInt(audioFormat.contentLength);
-            console.log('Expected file size:', Math.round(totalBytes/1024/1024), 'MB');
+            const writeStream = fs.createWriteStream(tempFile);
 
             const stream = ytdl.downloadFromInfo(info, { format: audioFormat })
                 .on('data', chunk => {
                     downloadedBytes += chunk.length;
-                    const percent = Math.min(Math.round((downloadedBytes / totalBytes) * 100), 100);
+                    const percent = Math.min(Math.round((downloadedBytes / totalBytes) * 100), 50);
                     console.log(`Download: ${percent}% (${Math.round(downloadedBytes/1024/1024)}MB/${Math.round(totalBytes/1024/1024)}MB)`);
                     progressCallback(percent);
                 })
                 .pipe(writeStream);
 
-            // Wait for download to complete
             await new Promise((resolve, reject) => {
                 writeStream.on('finish', resolve);
                 writeStream.on('error', reject);
             });
 
             console.log('Download completed, starting conversion');
-            progressCallback(50); // Mark 50% at conversion start
+            progressCallback(50);
 
-            // Convert the temp file to MP3
             await new Promise((resolve, reject) => {
                 ffmpeg(tempFile)
+                    .toFormat('mp3')
                     .audioCodec('libmp3lame')
-                    .audioBitrate('128k')
-                    .format('mp3')
+                    .audioBitrate('192k')
                     .on('progress', progress => {
                         if (progress.percent) {
                             const percent = Math.min(50 + Math.round(progress.percent / 2), 100);
@@ -77,13 +72,11 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
                         }
                     })
                     .on('end', () => {
-                        console.log('Conversion completed');
-                        // Clean up temp file
                         fs.unlink(tempFile, () => {});
                         resolve();
                     })
-                    .on('error', (error) => {
-                        console.error('FFmpeg error:', error);
+                    .on('error', error => {
+                        fs.unlink(tempFile, () => {});
                         reject(error);
                     })
                     .save(outputPath);
@@ -99,7 +92,6 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
 
         } catch (error) {
             console.error('Error in download process:', error);
-            // Clean up any partial files
             [outputPath, tempFile].forEach(file => {
                 if (fs.existsSync(file)) {
                     fs.unlinkSync(file);
