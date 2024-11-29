@@ -26,7 +26,6 @@ async function downloadYoutubeAudio(videoUrl, filename) {
     return new Promise((resolve, reject) => {
         const outputPath = path.join(MUSIC_DIR, `${filename}.mp3`);
         
-        // Skip if file already exists
         if (fs.existsSync(outputPath)) {
             resolve(outputPath);
             return;
@@ -34,14 +33,33 @@ async function downloadYoutubeAudio(videoUrl, filename) {
 
         const stream = ytdl(videoUrl, {
             quality: 'highestaudio',
-            filter: 'audioonly'
+            filter: 'audioonly',
+            requestOptions: {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': '*/*',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Range': 'bytes=0-'
+                }
+            }
+        });
+
+        stream.on('error', (error) => {
+            console.error('YouTube download error:', error);
+            reject(error);
         });
 
         ffmpeg(stream)
             .audioBitrate(128)
             .toFormat('mp3')
-            .on('end', () => resolve(outputPath))
-            .on('error', reject)
+            .on('error', (error) => {
+                console.error('FFmpeg error:', error);
+                reject(error);
+            })
+            .on('end', () => {
+                console.log('Download completed:', filename);
+                resolve(outputPath);
+            })
             .save(outputPath);
     });
 }
