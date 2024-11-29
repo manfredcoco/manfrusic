@@ -1,5 +1,4 @@
-const ytdl = require('ytdl-core');
-const yts = require('yt-search');
+const play = require('play-dl');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
@@ -28,31 +27,33 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
 
         try {
             console.log('Getting video info from YouTube:', videoUrl);
-            const info = await ytdl.getInfo(videoUrl);
-            
-            const stream = ytdl(videoUrl, {
-                quality: 'highestaudio',
-                filter: 'audioonly'
+            const yt_info = await play.video_info(videoUrl);
+            const stream = await play.stream_from_info(yt_info, {
+                quality: 2, // lower quality for faster download
+                discordPlayerCompatibility: true
             });
 
-            // Track download progress
-            stream.on('progress', (_, downloaded, total) => {
-                const percent = Math.min(Math.round((downloaded / total) * 50), 50);
-                console.log(`Download progress: ${percent}% (${Math.round(downloaded/1024/1024)}MB/${Math.round(total/1024/1024)}MB)`);
-                progressCallback(percent);
-            });
-
-            // Track any errors
-            stream.on('error', (error) => {
-                console.error('Download error:', error);
-                reject(error);
-            });
+            // Get video duration for progress calculation
+            const duration = yt_info.video_details.durationInSec;
+            console.log('Video duration:', duration, 'seconds');
 
             console.log('Starting download...');
+            progressCallback(0);
             
             // First download to temp file
             const writeStream = fs.createWriteStream(tempFile);
-            stream.pipe(writeStream);
+            let downloadedSize = 0;
+            
+            stream.stream
+                .on('data', chunk => {
+                    downloadedSize += chunk.length;
+                    // Estimate progress based on typical audio bitrate
+                    const estimatedTotal = duration * 128 * 1024 / 8; // Assuming 128kbps
+                    const percent = Math.min(Math.round((downloadedSize / estimatedTotal) * 50), 50);
+                    console.log(`Download progress: ${percent}% (${Math.round(downloadedSize/1024/1024)}MB)`);
+                    progressCallback(percent);
+                })
+                .pipe(writeStream);
 
             // Wait for download to complete
             await new Promise((resolve, reject) => {
@@ -73,9 +74,11 @@ async function downloadYoutubeAudio(videoUrl, filename, progressCallback) {
                     .audioCodec('libmp3lame')
                     .audioBitrate('192k')
                     .on('progress', (progress) => {
-                        const percent = Math.min(50 + Math.round(progress.percent / 2), 100);
-                        console.log(`Converting: ${progress.percent}% (Total: ${percent}%)`);
-                        progressCallback(percent);
+                        if (progress.percent) {
+                            const percent = Math.min(50 + Math.round(progress.percent / 2), 100);
+                            console.log(`Converting: ${progress.percent}% (Total: ${percent}%)`);
+                            progressCallback(percent);
+                        }
                     })
                     .on('end', () => {
                         console.log('Conversion completed');
