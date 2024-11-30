@@ -713,12 +713,7 @@ async function handleYoutubePlay(interaction) {
             const stream = ytdl(video.url, {
                 filter: 'audioonly',
                 quality: 'highestaudio',
-                highWaterMark: 1 << 25,
-                requestOptions: {
-                    headers: {
-                        cookie: process.env.YOUTUBE_COOKIE // Add this if you have it
-                    }
-                }
+                highWaterMark: 1 << 25
             });
 
             // Create the audio resource
