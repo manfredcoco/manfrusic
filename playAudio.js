@@ -15,7 +15,7 @@ const fs = require('fs');
 const Fuse = require('fuse.js');
 const WebSocket = require('ws');
 const { searchYoutube, downloadYoutubeAudio } = require('./youtubeHandler');
-const mm = require('music-metadata');
+const { parseFile } = require('music-metadata');
 const path = require('path');
 const { StreamType } = require('@discordjs/voice');
 
@@ -312,9 +312,8 @@ client.on('interactionCreate', async interaction => {
                     console.log('Attempting to connect...');
                     const voiceConnection = await setupVoiceConnection();
                     console.log('Connection established');
-                    loadPlaylist();
                     
-                    if (playlist.length === 0) {
+                    if (!loadPlaylist()) {
                         await interaction.reply({ 
                             content: 'No songs available. Please add some MP3 files first.',
                             ephemeral: true 
@@ -322,25 +321,20 @@ client.on('interactionCreate', async interaction => {
                         return;
                     }
 
+                    isConnected = true;
                     const success = await startPlayback(voiceConnection);
-                    if (success) {
-                        await interaction.reply({ 
-                            content: 'Connected and started playlist!',
-                            ephemeral: true 
-                        });
-                    } else {
-                        await interaction.reply({ 
-                            content: 'Connected but failed to start playback.',
-                            ephemeral: true 
-                        });
-                    }
+                    
+                    await interaction.reply({ 
+                        content: success ? 'Connected and started playlist!' : 'Connected but failed to start playback.',
+                        ephemeral: true 
+                    });
                 } catch (error) {
                     console.error('Connect error:', error);
+                    isConnected = false;
                     await interaction.reply({ 
                         content: 'Failed to connect to voice channel',
                         ephemeral: true 
                     });
-                    isConnected = false;
                 }
                 break;
 
@@ -380,25 +374,50 @@ client.on('interactionCreate', async interaction => {
                 break;
 
             case 'search':
-                const searchQuery = interaction.options.getString('query');
-                if (playlist.length === 0) {
-                    await interaction.reply('No songs available. Please add some MP3 files first.');
-                    return;
-                }
-                
-                const searchResults = fuseSearch.search(searchQuery);
-                lastSearchResults = searchResults;
-                
-                if (searchResults.length === 0) {
-                    await interaction.reply('No matches found');
-                    return;
-                }
+                try {
+                    const searchQuery = interaction.options.getString('query');
+                    if (!searchQuery) {
+                        await interaction.reply({ 
+                            content: 'Please provide a search query',
+                            ephemeral: true 
+                        });
+                        return;
+                    }
 
-                const topResults = searchResults.slice(0, 5).map((result, index) => 
-                    `${index + 1}. ${result.item.cleanName}`
-                ).join('\n');
+                    if (playlist.length === 0) {
+                        await interaction.reply({ 
+                            content: 'No songs available. Please add some MP3 files first.',
+                            ephemeral: true 
+                        });
+                        return;
+                    }
 
-                await interaction.reply(`Top matches:\n${topResults}\n\nUse /play <number> to play a song`);
+                    const searchResults = fuseSearch.search(searchQuery);
+                    lastSearchResults = searchResults;
+
+                    if (searchResults.length === 0) {
+                        await interaction.reply({ 
+                            content: 'No matches found',
+                            ephemeral: true 
+                        });
+                        return;
+                    }
+
+                    const topResults = searchResults.slice(0, 5)
+                        .map((result, index) => `${index + 1}. ${result.item.cleanName}`)
+                        .join('\n');
+
+                    await interaction.reply({
+                        content: `Top matches:\n${topResults}\n\nUse /play <number> to play a song`,
+                        ephemeral: true
+                    });
+                } catch (error) {
+                    console.error('Search error:', error);
+                    await interaction.reply({ 
+                        content: 'Failed to perform search',
+                        ephemeral: true 
+                    });
+                }
                 break;
 
             case 'play':
@@ -652,28 +671,20 @@ function sanitizeFilename(filename) {
 
 async function getSongInfo(filePath) {
     try {
-        const metadata = await mm.parseFile(filePath);
-        if (metadata.common.title) {
-            return {
-                title: metadata.common.title,
-                artist: metadata.common.artist || 'Unknown Artist',
-                duration: metadata.format.duration || 0
-            };
-        }
+        const metadata = await parseFile(filePath);
+        return {
+            title: metadata.common.title || path.basename(filePath, '.mp3'),
+            duration: metadata.format.duration || 0,
+            artist: metadata.common.artist || 'Unknown'
+        };
     } catch (error) {
         console.error('Metadata parsing error:', error);
+        return {
+            title: path.basename(filePath, '.mp3'),
+            duration: 0,
+            artist: 'Unknown'
+        };
     }
-
-    // Fallback to filename if no metadata
-    const filename = path.basename(filePath, '.mp3')
-        .replace(/_/g, ' ')
-        .replace(/-/g, ' - ');
-    
-    return {
-        title: filename,
-        artist: 'Unknown Artist',
-        duration: 0
-    };
 } 
 
 client.on('messageCreate', async message => {
