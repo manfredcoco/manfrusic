@@ -14,7 +14,8 @@
     "play-dl": "^1.9.7",
     "ws": "^8.16.0",
     "youtube-search-api": "^1.2.2",
-    "yt-search": "^2.12.1"
+    "yt-search": "^2.12.1",
+    "ytdl-core": "^4.11.5"
   },
   "name": "discord",
   "version": "1.0.0",

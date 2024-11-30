@@ -19,6 +19,7 @@ const musicMetadata = require('music-metadata');
 const path = require('path');
 const { StreamType } = require('@discordjs/voice');
 const { parseFile } = require('music-metadata');
+const ytdl = require('ytdl-core');
 
 if (!process.env.BOT_TOKEN) {
     console.error('BOT_TOKEN is not set in environment variables');
