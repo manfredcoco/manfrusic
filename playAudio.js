@@ -149,7 +149,7 @@ function shufflePlaylist() {
     }
 }
 
-async function startPlayback(initialConnection = null, message = null) {
+async function startPlayback(initialConnection = null, interaction = null) {
     try {
         if (currentPlayer) {
             currentPlayer.removeAllListeners();
@@ -174,8 +174,8 @@ async function startPlayback(initialConnection = null, message = null) {
             loadPlaylist();
             if (playlist.length === 0) {
                 console.log('No MP3 files found in music directory');
-                if (message) {
-                    message.reply('No songs available. Please add some MP3 files first.');
+                if (interaction && !interaction.replied) {
+                    await interaction.editReply('No songs available. Please add some MP3 files first.');
                 }
                 return;
             }
@@ -222,7 +222,7 @@ async function startPlayback(initialConnection = null, message = null) {
                 setTimeout(() => {
                     if (currentPlayer === player) {  // Check if this is still the current player
                         console.log('Song finished naturally, playing next song');
-                        startPlayback(connection, message).catch(console.error);
+                        startPlayback(connection, interaction).catch(console.error);
                     }
                 }, 1000);
             }
@@ -240,6 +240,9 @@ async function startPlayback(initialConnection = null, message = null) {
         return true;
     } catch (error) {
         console.error('Playback error:', error);
+        if (interaction && !interaction.replied) {
+            await interaction.editReply('An error occurred during playback');
+        }
         return false;
     }
 }
@@ -388,15 +391,17 @@ client.on('interactionCreate', async interaction => {
                     return;
                 }
                 try {
+                    await interaction.deferReply();
                     console.log('Attempting to connect...');
                     const connection = await setupVoiceConnection();
                     console.log('Connection established');
                     loadPlaylist();
                     await startPlayback(connection, interaction);
-                    await interaction.reply('Connected and started playlist!');
                 } catch (error) {
                     console.error('Connect error:', error);
-                    await interaction.reply('Failed to connect to voice channel');
+                    if (!interaction.replied) {
+                        await interaction.editReply('Failed to connect to voice channel');
+                    }
                     isConnected = false;
                 }
                 break;
