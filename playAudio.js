@@ -15,7 +15,7 @@ const fs = require('fs');
 const Fuse = require('fuse.js');
 const WebSocket = require('ws');
 const { searchYoutube, downloadYoutubeAudio } = require('./youtubeHandler');
-const mm = require('music-metadata');
+const musicMetadata = require('music-metadata');
 const path = require('path');
 const { StreamType } = require('@discordjs/voice');
 
@@ -586,7 +586,7 @@ function sanitizeFilename(filename) {
 
 async function getSongInfo(filePath) {
     try {
-        const metadata = await mm.parseFile(join(MUSIC_DIR, filePath));
+        const metadata = await musicMetadata.parseFile(join(MUSIC_DIR, filePath));
         return {
             title: metadata.common.title || path.basename(filePath, '.mp3'),
             duration: metadata.format.duration || 0,
@@ -594,10 +594,13 @@ async function getSongInfo(filePath) {
         };
     } catch (error) {
         console.error('Metadata parsing error:', error);
+        // Fallback to filename parsing
+        const filename = path.basename(filePath, '.mp3');
+        const parts = filename.split(' - ');
         return {
-            title: path.basename(filePath, '.mp3'),
+            title: parts[1] || filename,
             duration: 0,
-            artist: 'Unknown'
+            artist: parts[0] || 'Unknown'
         };
     }
 } 
@@ -625,38 +628,38 @@ function createProgressBar(current, total, isPaused = false) {
     return `\`${formatTime(current)} ${bar} ${formatTime(total)}\``;
 }
 
-async function updateNowPlayingEmbed(songInfo, message = null) {
-    const embed = {
-        color: 0x3498db,
-        author: {
-            name: '🎵 Now Playing'
-        },
-        title: songInfo.title,
-        description: `by ${songInfo.artist}`,
-        fields: [
-            {
-                name: '\u200b',
-                value: createProgressBar(
-                    songInfo.currentTime, 
-                    songInfo.duration,
-                    songInfo.isPaused
-                )
+async function updateNowPlayingEmbed(songInfo) {
+    try {
+        // Delete old message if it exists
+        if (currentNowPlayingMessage) {
+            try {
+                await currentNowPlayingMessage.delete().catch(() => {});
+            } catch (error) {
+                // Ignore deletion errors
             }
-        ],
-        footer: {
-            text: songInfo.isPaused ? '⏸ Paused' : '▶ Playing'
-        },
-        timestamp: new Date()
-    };
+        }
+        
+        // Reset the current message
+        currentNowPlayingMessage = null;
+        
+        // Send new message
+        const channel = await client.channels.fetch(process.env.MUSIC_CHANNEL_ID);
+        if (!channel) return;
 
-    if (message) {
-        return await message.edit({ embeds: [embed] });
-    } else {
-        const channel = client.channels.cache.get(process.env.MUSIC_CHANNEL_ID);
-        const msg = await channel.send({ embeds: [embed] });
-        await msg.react('⏯️');
-        await msg.react('️');
-        return msg;
+        currentNowPlayingMessage = await channel.send({
+            content: `🎵 Now Playing:\n**${songInfo.title}**\nArtist: ${songInfo.artist}`
+        });
+
+        // Add reaction
+        if (currentNowPlayingMessage) {
+            try {
+                await currentNowPlayingMessage.react('⏭️').catch(() => {});
+            } catch (error) {
+                console.error('Failed to add reaction:', error);
+            }
+        }
+    } catch (error) {
+        console.error('Failed to update now playing message:', error);
     }
 }
 
