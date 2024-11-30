@@ -754,9 +754,20 @@ async function handleYoutubePlay(interaction) {
             // Wait a moment for the file system to update
             await new Promise(resolve => setTimeout(resolve, 1000));
             
-            // Add to playlist and play
-            await this.handlePlay(interaction, filename);
-            await interaction.editReply(`Now playing: ${video.title}`);
+            // Use the handlePlay command directly
+            const command = interaction.client.commands.get('play');
+            if (command) {
+                const playInteraction = {
+                    ...interaction,
+                    options: {
+                        getString: () => filename
+                    }
+                };
+                await command.execute(playInteraction);
+                await interaction.editReply(`Now playing: ${video.title}`);
+            } else {
+                throw new Error('Play command not found');
+            }
 
         } catch (error) {
             console.error('Download/playback error:', error);
