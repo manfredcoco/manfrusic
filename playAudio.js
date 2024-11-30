@@ -542,36 +542,39 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-async function playSpecificSong(songFilename, connection, interaction = null) {
+async function playSpecificSong(songFilename, connection) {
     try {
-        const songPath = join(MUSIC_DIR, songFilename);
-        if (!fs.existsSync(songPath)) {
-            console.error('Song file not found:', songPath);
-            return false;
-        }
-
         const songInfo = await getSongInfo(songFilename);
         console.log('Playing:', songInfo.title);
 
-        const resource = createAudioResource(songPath, {
-            inputType: StreamType.Arbitrary,
-            inlineVolume: true
+        // Create the resource first
+        const resource = createAudioResource(join(MUSIC_DIR, songFilename), {
+            inputType: StreamType.Arbitrary
         });
 
-        if (!currentPlayer) {
-            currentPlayer = createAudioPlayer({
-                behaviors: {
-                    noSubscriber: NoSubscriberBehavior.Play
-                }
-            });
-        }
+        // Set up the player
+        const player = createAudioPlayer({
+            behaviors: {
+                noSubscriber: NoSubscriberBehavior.Play
+            }
+        });
 
-        resource.volume.setVolume(currentVolume);
-        currentPlayer.play(resource);
-        connection.subscribe(currentPlayer);
-        
-        // Update now playing message with interaction
-        await updateNowPlayingEmbed(songInfo, interaction);
+        // Play the resource
+        player.play(resource);
+        connection.subscribe(player);
+
+        // Update the now playing message after starting playback
+        await updateNowPlayingEmbed(songInfo);
+
+        // Set up player events
+        player.on(AudioPlayerStatus.Idle, () => {
+            startPlayback(connection);
+        });
+
+        player.on('error', error => {
+            console.error('Player error:', error);
+            startPlayback(connection);
+        });
 
         return true;
     } catch (error) {
@@ -593,8 +596,8 @@ async function getSongInfo(filePath) {
         const metadata = await musicMetadata.parseFile(fullPath);
         return {
             title: metadata.common.title || path.basename(filePath, '.mp3'),
-            duration: metadata.format.duration || 0,
-            artist: metadata.common.artist || 'Unknown'
+            artist: metadata.common.artist || 'Unknown Artist',
+            duration: metadata.format.duration || 0
         };
     } catch (error) {
         console.error('Metadata parsing error:', error);
@@ -603,8 +606,8 @@ async function getSongInfo(filePath) {
         const parts = filename.split(' - ');
         return {
             title: parts[1] || filename,
-            duration: 0,
-            artist: parts[0] || 'Unknown'
+            artist: parts[0] || 'Unknown Artist',
+            duration: 0
         };
     }
 } 
@@ -635,45 +638,50 @@ function createProgressBar(current, total, isPaused = false) {
 async function updateNowPlayingEmbed(songInfo) {
     try {
         const channel = await client.channels.fetch(process.env.MUSIC_CHANNEL_ID);
-        if (!channel) return;
+        if (!channel) {
+            console.error('Could not find music channel');
+            return;
+        }
 
         // Delete previous message if it exists
         if (currentNowPlayingMessage) {
             try {
                 await currentNowPlayingMessage.delete().catch(() => {});
             } catch (error) {
-                // Ignore deletion errors
+                console.error('Error deleting previous message:', error);
             }
+            currentNowPlayingMessage = null;
         }
 
         const embed = {
             color: 0x0099ff,
             title: '🎵 Now Playing',
-            fields: [
-                {
-                    name: 'Title',
-                    value: songInfo.title || 'Unknown',
-                    inline: true
-                },
-                {
-                    name: 'Artist',
-                    value: songInfo.artist || 'Unknown',
-                    inline: true
-                }
-            ],
+            description: `**${songInfo.title}**\nby ${songInfo.artist}`,
+            footer: {
+                text: 'React with ⏭️ to skip'
+            },
             timestamp: new Date()
         };
 
-        // Send new message
-        currentNowPlayingMessage = await channel.send({ embeds: [embed] });
+        try {
+            // Send message and wait for it to be sent
+            const message = await channel.send({ 
+                embeds: [embed],
+                fetchReply: true // This ensures we get the message object back
+            });
 
-        // Add reaction
-        if (currentNowPlayingMessage) {
-            try {
-                await currentNowPlayingMessage.react('⏭️');
-            } catch (error) {
-                console.error('Failed to add reaction:', error);
+            // Store the message reference
+            currentNowPlayingMessage = message;
+
+            // Wait a moment before adding reaction
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            // Only add reaction if message still exists
+            if (message && !message.deleted) {
+                await message.react('⏭️');
             }
+        } catch (error) {
+            console.error('Error sending/updating now playing message:', error);
         }
     } catch (error) {
         console.error('Failed to update now playing message:', error);
