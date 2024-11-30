@@ -709,34 +709,22 @@ async function handleYoutubePlay(interaction) {
             
             await interaction.followUp(`Downloading: ${video.title}\nPlease wait...`);
 
-            // Create a readable stream from ytdl
-            const stream = ytdl(video.url, {
-                filter: 'audioonly',
-                quality: 'highestaudio',
-                highWaterMark: 1 << 25
-            });
-
-            // Create the audio resource
-            const resource = createAudioResource(stream, {
+            // Download the audio using youtubeHandler
+            const filename = `${video.title.replace(/[^a-z0-9]/gi, '_')}`;
+            const outputPath = await downloadYoutubeAudio(video.url, filename);
+            
+            // Play the downloaded file
+            const resource = createAudioResource(outputPath, {
                 inputType: StreamType.Arbitrary,
                 inlineVolume: true
             });
 
-            // Create and configure the audio player
             const player = createAudioPlayer({
                 behaviors: {
                     noSubscriber: NoSubscriberBehavior.Play
                 }
             });
 
-            // Set up stream error handling
-            stream.on('error', async error => {
-                console.error('Stream error:', error);
-                await interaction.followUp('Error during stream playback. Please try again.');
-                startPlayback(connection);
-            });
-
-            // Set up player events
             player.on(AudioPlayerStatus.Playing, () => {
                 isPlaying = true;
                 interaction.followUp(`Now playing: ${video.title}`);
