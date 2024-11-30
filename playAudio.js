@@ -754,8 +754,8 @@ async function handleYoutubePlay(interaction) {
             // Wait a moment for the file system to update
             await new Promise(resolve => setTimeout(resolve, 1000));
             
-            // Play the file directly
-            await playAudio(interaction, filename);
+            // Add to playlist and play
+            await this.handlePlay(interaction, filename);
             await interaction.editReply(`Now playing: ${video.title}`);
 
         } catch (error) {
