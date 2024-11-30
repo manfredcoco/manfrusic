@@ -667,18 +667,6 @@ async function updateNowPlayingEmbed(songInfo) {
         // Create a new message if we don't have one
         if (!nowPlayingMessage) {
             try {
-                // Delete any existing bot messages in the channel
-                const messages = await channel.messages.fetch({ limit: 10 });
-                const botMessages = messages.filter(msg => msg.author.id === client.user.id);
-                for (const msg of botMessages.values()) {
-                    try {
-                        await msg.delete();
-                    } catch (error) {
-                        // Ignore deletion errors
-                    }
-                }
-
-                // Send new message
                 nowPlayingMessage = await channel.send({ embeds: [embed] });
             } catch (error) {
                 console.error('Error creating new now playing message:', error);
