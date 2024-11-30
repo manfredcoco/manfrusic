@@ -598,14 +598,26 @@ function sanitizeFilename(filename) {
 
 async function getSongInfo(filePath) {
     try {
-        // Just use the filename parsing for now
-        const filename = path.basename(filePath, '.mp3');
-        const parts = filename.split(' - ');
-        return {
-            title: parts[1] || filename,
-            artist: parts[0] || 'Unknown Artist',
-            duration: 0
-        };
+        // Remove the ID number from filename
+        const cleanName = filePath.replace(/_\d+\.mp3$/, '.mp3');
+        const filename = path.basename(cleanName, '.mp3');
+        
+        // Split on ' - ' if it exists
+        if (filename.includes(' - ')) {
+            const [artist, title] = filename.split(' - ');
+            return {
+                title: title || filename,
+                artist: artist || 'Unknown Artist',
+                duration: 0
+            };
+        } else {
+            // If no ' - ' separator, use the whole filename as title
+            return {
+                title: filename,
+                artist: 'Unknown Artist',
+                duration: 0
+            };
+        }
     } catch (error) {
         console.error('Error parsing song info:', error);
         return {
@@ -619,11 +631,17 @@ async function getSongInfo(filePath) {
 client.on('messageCreate', async message => {
     if (message.channelId !== process.env.MUSIC_CHANNEL_ID) return;
     
+    // Don't delete bot messages that are:
+    // - Now playing messages (embeds)
+    // - Search results (contains numbered list)
+    if (message.author.id === client.user.id && 
+        (message.embeds.length > 0 || 
+         message.content.match(/^\d+\./m))) {
+        return;
+    }
+    
     // Don't delete the now playing message
     if (message.id === nowPlayingMessage?.id) return;
-    
-    // Don't delete bot messages that are embeds (now playing messages)
-    if (message.author.id === client.user.id && message.embeds.length > 0) return;
     
     if (!message.content.startsWith('/')) {
         await message.delete().catch(console.error);
