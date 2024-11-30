@@ -653,7 +653,7 @@ async function handleYoutubeSearch(interaction) {
         
         const results = await searchYoutube(query);
         if (!results || results.length === 0) {
-            await interaction.followUp('No results found.');
+            await interaction.editReply('No results found.');
             return;
         }
 
@@ -665,11 +665,11 @@ async function handleYoutubeSearch(interaction) {
         });
         response += 'Use /ytplay <number> to play a video';
 
-        // Send new search results
-        await interaction.followUp(response);
+        // Use editReply instead of followUp
+        await interaction.editReply(response);
     } catch (error) {
         console.error('Search error:', error);
-        await interaction.followUp('Failed to search YouTube');
+        await interaction.editReply('Failed to search YouTube');
     }
 }
 
@@ -679,7 +679,7 @@ async function handleYoutubePlay(interaction) {
         const number = interaction.options.getInteger('number');
         
         if (!searchResults || !searchResults[number - 1]) {
-            await interaction.followUp('No valid search results found. Please search first using /ytsearch');
+            await interaction.editReply('No valid search results found. Please search first using /ytsearch');
             return;
         }
 
@@ -689,15 +689,15 @@ async function handleYoutubePlay(interaction) {
         // Get voice connection
         const connection = getVoiceConnection(interaction.guildId);
         if (!connection) {
-            await interaction.followUp('Not connected to a voice channel. Use /join first!');
+            await interaction.editReply('Not connected to a voice channel. Use /join first!');
             return;
         }
 
-        await interaction.followUp(`Downloading: ${video.title}\nPlease wait...`);
-
         try {
+            await interaction.editReply(`Downloading: ${video.title}\nPlease wait...`);
+
             // Create a readable stream from ytdl
-            const stream = await ytdl(video.url, {
+            const stream = ytdl(video.url, {
                 filter: 'audioonly',
                 quality: 'highestaudio',
                 highWaterMark: 1 << 25
@@ -719,7 +719,7 @@ async function handleYoutubePlay(interaction) {
             // Set up error handling for the stream
             stream.on('error', error => {
                 console.error('Stream error:', error);
-                interaction.followUp('Error during playback. Please try again.');
+                interaction.editReply('Error during playback. Please try again.');
             });
 
             // Play the audio
@@ -729,20 +729,20 @@ async function handleYoutubePlay(interaction) {
             // Set up player event handlers
             player.on('error', error => {
                 console.error('Player error:', error);
-                interaction.followUp('Playback error occurred.');
+                interaction.editReply('Playback error occurred.');
             });
 
             player.on('stateChange', (oldState, newState) => {
                 console.log(`Player state changed from ${oldState.status} to ${newState.status}`);
             });
 
-            await interaction.followUp(`Now playing: ${video.title}`);
+            await interaction.editReply(`Now playing: ${video.title}`);
         } catch (error) {
             console.error('Download/playback error:', error);
-            await interaction.followUp('Failed to download or play the video');
+            await interaction.editReply('Failed to download or play the video');
         }
     } catch (error) {
         console.error('Command error:', error);
-        await interaction.followUp('An error occurred while processing the command');
+        await interaction.editReply('An error occurred while processing the command');
     }
 }
