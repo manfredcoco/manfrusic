@@ -687,7 +687,7 @@ async function handleYoutubeSearch(interaction) {
 
 async function handleYoutubePlay(interaction) {
     try {
-        await interaction.deferReply();
+        await interaction.reply('Processing your request...');
         const number = interaction.options.getInteger('number');
         
         if (!searchResults || !searchResults[number - 1]) {
@@ -696,10 +696,8 @@ async function handleYoutubePlay(interaction) {
         }
 
         const video = searchResults[number - 1];
-        console.log('Selected video:', video);
-
-        // Get voice connection
         const connection = getVoiceConnection(interaction.guildId);
+        
         if (!connection) {
             await interaction.editReply('Not connected to a voice channel. Use /join first!');
             return;
@@ -707,6 +705,9 @@ async function handleYoutubePlay(interaction) {
 
         try {
             await interaction.editReply(`Downloading: ${video.title}\nPlease wait...`);
+
+            // Stop current playback if any
+            stopCurrentPlayback();
 
             // Create a readable stream from ytdl
             const stream = ytdl(video.url, {
@@ -717,8 +718,7 @@ async function handleYoutubePlay(interaction) {
 
             // Create the audio resource
             const resource = createAudioResource(stream, {
-                inputType: StreamType.Arbitrary,
-                inlineVolume: true
+                inputType: StreamType.Arbitrary
             });
 
             // Create and configure the audio player
@@ -728,33 +728,47 @@ async function handleYoutubePlay(interaction) {
                 }
             });
 
-            // Set up error handling for the stream
-            stream.on('error', error => {
-                console.error('Stream error:', error);
-                interaction.editReply('Error during playback. Please try again.');
+            // Set up player events similar to playSpecificSong
+            player.on(AudioPlayerStatus.Playing, () => {
+                isPlaying = true;
+            });
+
+            player.on(AudioPlayerStatus.Idle, () => {
+                isPlaying = false;
+                startPlayback(connection); // Continue with regular playlist
+            });
+
+            player.on('error', async error => {
+                console.error('Player error:', error);
+                isPlaying = false;
+                await interaction.followUp('Playback error occurred.');
+                startPlayback(connection); // Continue with regular playlist
             });
 
             // Play the audio
             player.play(resource);
             connection.subscribe(player);
+            currentPlayer = player;
 
-            // Set up player event handlers
-            player.on('error', error => {
-                console.error('Player error:', error);
-                interaction.editReply('Playback error occurred.');
-            });
-
-            player.on('stateChange', (oldState, newState) => {
-                console.log(`Player state changed from ${oldState.status} to ${newState.status}`);
+            // Update now playing message
+            await updateNowPlayingEmbed({
+                title: video.title,
+                artist: video.author
             });
 
             await interaction.editReply(`Now playing: ${video.title}`);
+
         } catch (error) {
             console.error('Download/playback error:', error);
-            await interaction.editReply('Failed to download or play the video');
+            await interaction.followUp('Failed to download or play the video');
+            startPlayback(connection); // Fallback to regular playlist
         }
     } catch (error) {
         console.error('Command error:', error);
-        await interaction.editReply('An error occurred while processing the command');
+        if (!interaction.replied) {
+            await interaction.reply('An error occurred while processing the command');
+        } else {
+            await interaction.followUp('An error occurred while processing the command');
+        }
     }
 }
