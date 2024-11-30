@@ -452,75 +452,12 @@ client.on('interactionCreate', async interaction => {
 
             case 'ytsearch':
                 const ytQuery = interaction.options.getString('query');
-                await interaction.deferReply();
-                
-                try {
-                    const ytResults = await searchYoutube(ytQuery);
-                    youtubeSearchResults = ytResults;
-                    
-                    const ytResultList = ytResults.map((video, index) => 
-                        `${index + 1}. ${video.title}\n` +
-                        `   Duration: ${video.duration} | Channel: ${video.author}\n`
-                    ).join('\n');
-                    
-                    await interaction.editReply(
-                        `**YouTube Search Results:**\n\n${ytResultList}\n` +
-                        `Use /ytplay <number> to play a video`
-                    );
-                } catch (error) {
-                    console.error('Search error:', error);
-                    await interaction.editReply('Failed to search YouTube');
-                }
+                await handleYoutubeSearch(interaction, ytQuery);
                 break;
 
             case 'ytplay':
                 const ytNumber = interaction.options.getInteger('number');
-                await interaction.deferReply();
-                
-                if (!youtubeSearchResults || youtubeSearchResults.length === 0) {
-                    await interaction.editReply('Please search for videos first using /ytsearch');
-                    return;
-                }
-
-                if (ytNumber < 1 || ytNumber > youtubeSearchResults.length) {
-                    await interaction.editReply('Invalid video number');
-                    return;
-                }
-
-                try {
-                    const selectedVideo = youtubeSearchResults[ytNumber - 1];
-                    console.log('Selected video:', selectedVideo);
-
-                    const ytConn = await setupVoiceConnection();
-                    if (!ytConn) {
-                        await interaction.editReply('Failed to connect to voice channel');
-                        return;
-                    }
-                    console.log('Voice connection established');
-
-                    await interaction.editReply(`Downloading: ${selectedVideo.title}\nPlease wait...`);
-
-                    const filename = sanitizeFilename(selectedVideo.title);
-                    console.log('Sanitized filename:', filename);
-
-                    const outputPath = await downloadYoutubeAudio(selectedVideo.url, filename);
-                    // Reload playlist after download
-                    loadPlaylist();
-                    // Initialize search after updating playlist
-                    initializeSearch();
-                    
-                    const success = await playSpecificSong(`${filename}.mp3`, ytConn);
-                    
-                    if (success) {
-                        await interaction.editReply(`Now playing: ${selectedVideo.title}`);
-                    } else {
-                        await interaction.editReply('Failed to play the audio');
-                    }
-
-                } catch (error) {
-                    console.error('Download/playback error:', error);
-                    await interaction.editReply('Failed to download or play the video');
-                }
+                await handleYoutubePlay(interaction, ytNumber);
                 break;
         }
     } catch (error) {
@@ -708,3 +645,82 @@ const formatTime = (seconds) => {
     const remainingSeconds = Math.floor(seconds % 60);
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
 };
+
+async function handleYoutubeSearch(interaction, query) {
+    try {
+        await interaction.deferReply();
+        const results = await searchYoutube(query);
+        
+        if (!results || results.length === 0) {
+            await interaction.editReply('No results found.');
+            return;
+        }
+
+        let response = '**YouTube Search Results:**\n\n';
+        results.forEach((video, index) => {
+            response += `${index + 1}. ${video.title}\n   Duration: ${video.duration} | Channel: ${video.author}\n\n`;
+        });
+        response += 'Use /ytplay <number> to play a video';
+
+        // Send as a new message instead of editing
+        await interaction.channel.send(response);
+        await interaction.editReply('Search results displayed above ⬆️');
+    } catch (error) {
+        console.error('Search error:', error);
+        await interaction.editReply('Failed to search YouTube');
+    }
+}
+
+async function handleYoutubePlay(interaction, number) {
+    try {
+        await interaction.deferReply();
+        const video = searchResults[number - 1];
+        
+        if (!video) {
+            await interaction.editReply('Invalid selection. Please search first using /ytsearch.');
+            return;
+        }
+
+        console.log('Selected video:', video);
+        
+        // Get voice connection
+        const connection = await ensureVoiceConnection(interaction);
+        if (!connection) {
+            await interaction.editReply('Failed to join voice channel.');
+            return;
+        }
+        
+        console.log('Voice connection established');
+
+        // Send initial message
+        await interaction.editReply(`Now downloading: ${video.title}`);
+
+        try {
+            // Download and play
+            const stream = await ytdl(video.url, {
+                filter: 'audioonly',
+                quality: 'highestaudio'
+            });
+
+            const resource = createAudioResource(stream);
+            const player = createAudioPlayer();
+            
+            player.play(resource);
+            connection.subscribe(player);
+
+            // Update now playing
+            await updateNowPlayingEmbed({
+                title: video.title,
+                artist: video.author
+            });
+
+            await interaction.editReply(`Now playing: ${video.title}`);
+        } catch (error) {
+            console.error('Download/playback error:', error);
+            await interaction.editReply('Failed to download or play the video');
+        }
+    } catch (error) {
+        console.error('Command error:', error);
+        await interaction.editReply('An error occurred while processing the command');
+    }
+}
