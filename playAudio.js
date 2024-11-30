@@ -42,6 +42,8 @@ let updateInterval = null;
 let nowPlayingMessageId = null;
 let nowPlayingMessage = null;
 let isPlaying = false;
+let searchResults = [];
+let searchResultsMessage = null;
 
 const client = new Client({
     intents: [
@@ -451,13 +453,11 @@ client.on('interactionCreate', async interaction => {
                 break;
 
             case 'ytsearch':
-                const ytQuery = interaction.options.getString('query');
-                await handleYoutubeSearch(interaction, ytQuery);
+                await handleYoutubeSearch(interaction);
                 break;
 
             case 'ytplay':
-                const ytNumber = interaction.options.getInteger('number');
-                await handleYoutubePlay(interaction, ytNumber);
+                await handleYoutubePlay(interaction);
                 break;
         }
     } catch (error) {
@@ -646,9 +646,10 @@ const formatTime = (seconds) => {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
 };
 
-async function handleYoutubeSearch(interaction, query) {
+async function handleYoutubeSearch(interaction) {
     try {
         await interaction.deferReply();
+        const query = interaction.options.getString('query');
         const results = await searchYoutube(query);
         
         if (!results || results.length === 0) {
@@ -656,47 +657,78 @@ async function handleYoutubeSearch(interaction, query) {
             return;
         }
 
+        searchResults = results; // Store results globally
+        
         let response = '**YouTube Search Results:**\n\n';
         results.forEach((video, index) => {
             response += `${index + 1}. ${video.title}\n   Duration: ${video.duration} | Channel: ${video.author}\n\n`;
         });
         response += 'Use /ytplay <number> to play a video';
 
-        // Send as a new message instead of editing
-        await interaction.channel.send(response);
+        // Delete previous search results if they exist
+        if (searchResultsMessage) {
+            try {
+                await searchResultsMessage.delete();
+            } catch (error) {
+                console.error('Error deleting previous search results:', error);
+            }
+        }
+
+        // Send new search results
+        searchResultsMessage = await interaction.channel.send(response);
         await interaction.editReply('Search results displayed above ⬆️');
+
+        // Set timeout to clean up search results
+        setTimeout(async () => {
+            try {
+                if (searchResultsMessage) {
+                    await searchResultsMessage.delete();
+                    searchResultsMessage = null;
+                    searchResults = [];
+                }
+            } catch (error) {
+                console.error('Error cleaning up search results:', error);
+            }
+        }, 30000);
     } catch (error) {
         console.error('Search error:', error);
         await interaction.editReply('Failed to search YouTube');
     }
 }
 
-async function handleYoutubePlay(interaction, number) {
+async function handleYoutubePlay(interaction) {
     try {
         await interaction.deferReply();
+        const number = interaction.options.getInteger('number');
+        
+        if (!searchResults || !searchResults[number - 1]) {
+            await interaction.editReply('No valid search results found. Please search first using /ytsearch');
+            return;
+        }
+
         const video = searchResults[number - 1];
-        
-        if (!video) {
-            await interaction.editReply('Invalid selection. Please search first using /ytsearch.');
-            return;
-        }
-
         console.log('Selected video:', video);
-        
+
+        // Clean up search results message
+        if (searchResultsMessage) {
+            try {
+                await searchResultsMessage.delete();
+                searchResultsMessage = null;
+            } catch (error) {
+                console.error('Error deleting search results:', error);
+            }
+        }
+
         // Get voice connection
-        const connection = await ensureVoiceConnection(interaction);
+        const connection = getVoiceConnection(interaction.guildId);
         if (!connection) {
-            await interaction.editReply('Failed to join voice channel.');
+            await interaction.editReply('Not connected to a voice channel. Use /join first!');
             return;
         }
-        
-        console.log('Voice connection established');
 
-        // Send initial message
-        await interaction.editReply(`Now downloading: ${video.title}`);
+        await interaction.editReply(`Downloading: ${video.title}\nPlease wait...`);
 
         try {
-            // Download and play
             const stream = await ytdl(video.url, {
                 filter: 'audioonly',
                 quality: 'highestaudio'
@@ -707,12 +739,6 @@ async function handleYoutubePlay(interaction, number) {
             
             player.play(resource);
             connection.subscribe(player);
-
-            // Update now playing
-            await updateNowPlayingEmbed({
-                title: video.title,
-                artist: video.author
-            });
 
             await interaction.editReply(`Now playing: ${video.title}`);
         } catch (error) {
