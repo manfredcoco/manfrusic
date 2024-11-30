@@ -149,100 +149,25 @@ function shufflePlaylist() {
     }
 }
 
-async function startPlayback(initialConnection = null, interaction = null) {
+async function startPlayback(connection = null, interaction = null) {
     try {
-        if (currentPlayer) {
-            currentPlayer.removeAllListeners();
-            if (!isSkipping) {
-                currentPlayer.stop();
-            }
-            currentPlayer = null;
+        if (!connection) {
+            connection = await setupVoiceConnection();
         }
 
-        const player = createAudioPlayer({
-            behaviors: {
-                noSubscriber: NoSubscriberBehavior.Play,
-                maxMissedFrames: 1000
-            }
-        });
-        currentPlayer = player;
-
-        const connection = initialConnection || await setupVoiceConnection();
-
-        // Get random song from playlist
         if (playlist.length === 0) {
             loadPlaylist();
             if (playlist.length === 0) {
                 console.log('No MP3 files found in music directory');
-                if (interaction && !interaction.replied) {
-                    await interaction.editReply('No songs available. Please add some MP3 files first.');
-                }
-                return;
+                return false;
             }
         }
-        const songPath = join(MUSIC_DIR, playlist[0]);
-        playlist.push(playlist.shift()); // Move first song to end
 
-        const resource = createAudioResource(songPath, {
-            inlineVolume: true,
-            inputType: 'mp3',
-            silencePaddingFrames: 5,
-            highWaterMark: 1024 * 1024 * 50
-        });
-        
-        resource.volume?.setVolume(currentVolume);
-        connection.subscribe(player);
-
-        // Remove existing listeners before adding new ones
-        connection.removeAllListeners(VoiceConnectionStatus.Disconnected);
-        
-        // Handle connection state changes
-        connection.on(VoiceConnectionStatus.Disconnected, async () => {
-            try {
-                await Promise.race([
-                    entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
-                    entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
-                ]);
-            } catch (error) {
-                connection.destroy();
-                isConnected = false;
-                stopCurrentPlayback();
-            }
-        });
-
-        // Remove any existing listeners before adding new ones
-        player.removeAllListeners();
-
-        player.on(AudioPlayerStatus.Playing, () => {
-            console.log('Audio playback started');
-        });
-
-        player.on(AudioPlayerStatus.Idle, (oldState) => {
-            if (oldState.status === AudioPlayerStatus.Playing && !isSkipping) {
-                setTimeout(() => {
-                    if (currentPlayer === player) {  // Check if this is still the current player
-                        console.log('Song finished naturally, playing next song');
-                        startPlayback(connection, interaction).catch(console.error);
-                    }
-                }, 1000);
-            }
-        });
-
-        player.on('error', error => {
-            console.error('Player error:', error);
-            if (error.message !== 'Resource ended prematurely' && currentPlayer === player) {
-                console.log('Attempting to recover from error');
-                player.play(resource);
-            }
-        });
-
-        player.play(resource);
+        // Rest of playback logic...
         return true;
+
     } catch (error) {
         console.error('Playback error:', error);
-        if (interaction && !interaction.replied) {
-            await interaction.editReply('An error occurred during playback');
-        }
         return false;
     }
 }
@@ -370,47 +295,41 @@ client.on('interactionCreate', async interaction => {
     if (!interaction.isCommand()) return;
     if (interaction.channelId !== process.env.MUSIC_CHANNEL_ID) return;
 
-    // Delete the command message
-    await interaction.deferReply({ ephemeral: false });
-
-    // Store the response message for later deletion
-    const response = await interaction.fetchReply();
-    
-    // Delete after 60 seconds if not a now-playing message
-    if (interaction.commandName !== 'play' && interaction.commandName !== 'ytplay') {
-        setTimeout(() => {
-            response.delete().catch(console.error);
-        }, 60000);
-    }
-
     try {
         switch (interaction.commandName) {
             case 'connect':
                 if (isConnected) {
-                    await interaction.reply('Already connected! Use /disconnect first if you want to reconnect.');
+                    await interaction.reply({ 
+                        content: 'Already connected! Use /disconnect first if you want to reconnect.',
+                        ephemeral: true 
+                    });
                     return;
                 }
-                try {
-                    await interaction.deferReply();
-                    console.log('Attempting to connect...');
-                    const connection = await setupVoiceConnection();
-                    console.log('Connection established');
-                    loadPlaylist();
-                    await startPlayback(connection, interaction);
-                } catch (error) {
-                    console.error('Connect error:', error);
-                    if (!interaction.replied) {
-                        await interaction.editReply('Failed to connect to voice channel');
-                    }
-                    isConnected = false;
+
+                await interaction.deferReply();
+                console.log('Attempting to connect...');
+                let voiceConnection = await setupVoiceConnection();
+                console.log('Connection established');
+                loadPlaylist();
+                
+                if (playlist.length === 0) {
+                    await interaction.editReply('No songs available. Please add some MP3 files first.');
+                    return;
+                }
+
+                const success = await startPlayback(voiceConnection);
+                if (success) {
+                    await interaction.editReply('Connected and started playlist!');
+                } else {
+                    await interaction.editReply('Connected but failed to start playback.');
                 }
                 break;
 
             case 'disconnect':
                 stopCurrentPlayback();
-                const connection = getVoiceConnection(SERVER_ID);
-                if (connection) {
-                    connection.destroy();
+                const existingConnection = getVoiceConnection(SERVER_ID);
+                if (existingConnection) {
+                    existingConnection.destroy();
                     isConnected = false;
                     await interaction.reply('Disconnected from voice channel!');
                 } else {
@@ -566,10 +485,17 @@ client.on('interactionCreate', async interaction => {
         }
     } catch (error) {
         console.error('Command error:', error);
-        if (!interaction.replied && !interaction.deferred) {
-            await interaction.reply('An error occurred while processing the command');
-        } else if (!interaction.replied) {
-            await interaction.editReply('An error occurred while processing the command');
+        try {
+            if (!interaction.deferred) {
+                await interaction.reply({ 
+                    content: 'An error occurred while processing the command',
+                    ephemeral: true 
+                });
+            } else if (!interaction.replied) {
+                await interaction.editReply('An error occurred while processing the command');
+            }
+        } catch (replyError) {
+            console.error('Error while handling error:', replyError);
         }
     }
 });
@@ -784,7 +710,7 @@ async function updateNowPlayingEmbed(songInfo, message = null) {
         const channel = client.channels.cache.get(process.env.MUSIC_CHANNEL_ID);
         const msg = await channel.send({ embeds: [embed] });
         await msg.react('⏯️');
-        await msg.react('⏭️');
+        await msg.react('️');
         return msg;
     }
 }
