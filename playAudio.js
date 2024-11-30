@@ -652,14 +652,20 @@ async function handleYoutubeSearch(interaction) {
         const query = interaction.options.getString('query');
         
         // Initial reply
-        await interaction.deferReply();
+        await interaction.reply({ 
+            content: 'Searching YouTube...', 
+            ephemeral: true 
+        });
         
         // Perform search
         console.log('Searching YouTube for:', query);
         const results = await searchYoutube(query);
         
         if (!results || results.length === 0) {
-            await interaction.editReply('No results found.');
+            await interaction.followUp({ 
+                content: 'No results found.', 
+                ephemeral: true 
+            });
             return;
         }
 
@@ -673,17 +679,21 @@ async function handleYoutubeSearch(interaction) {
         });
         response += 'Use /ytplay <number> to play a video';
 
-        // Send results
-        await interaction.editReply(response);
+        // Send results as a follow-up message
+        await interaction.followUp(response);
 
     } catch (error) {
         console.error('Search error:', error);
-        const errorMessage = 'Failed to search YouTube';
-        
-        if (!interaction.replied && !interaction.deferred) {
-            await interaction.reply({ content: errorMessage, ephemeral: true });
+        if (!interaction.replied) {
+            await interaction.reply({ 
+                content: 'Failed to search YouTube', 
+                ephemeral: true 
+            });
         } else {
-            await interaction.editReply({ content: errorMessage, ephemeral: true });
+            await interaction.followUp({ 
+                content: 'Failed to search YouTube', 
+                ephemeral: true 
+            });
         }
     }
 }
