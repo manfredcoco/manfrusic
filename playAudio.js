@@ -721,6 +721,7 @@ async function handleYoutubeSearch(interaction) {
 
 async function handleYoutubePlay(interaction) {
     try {
+        // Initial reply must happen first
         await interaction.deferReply();
         const number = interaction.options.getInteger('number');
         
@@ -729,91 +730,37 @@ async function handleYoutubePlay(interaction) {
             return;
         }
 
-        // Clear search timeout since we're playing a selection
-        if (lastSearchTimeout) {
-            clearTimeout(lastSearchTimeout);
-            lastSearchTimeout = null;
-        }
-
-        // Delete search result message if it exists
-        if (searchResultMessage) {
-            try {
-                await searchResultMessage.delete().catch(() => {});
-                searchResultMessage = null;
-            } catch (error) {
-                console.error('Error deleting search message:', error);
-            }
-        }
-
         const video = searchResults[number - 1];
-        const connection = getVoiceConnection(interaction.guildId);
-        
-        if (!connection) {
-            await interaction.followUp('Not connected to a voice channel. Use /join first!');
-            return;
-        }
+        const sanitizedTitle = video.title.replace(/[^a-z0-9]/gi, '_');
+
+        // Update status
+        await interaction.editReply(`Downloading: ${video.title}\nPlease wait...`);
 
         try {
-            // Stop current playback if any
-            stopCurrentPlayback();
+            // Download the video
+            const outputPath = await downloadYoutubeAudio(video.url, sanitizedTitle);
             
-            await interaction.followUp(`Downloading: ${video.title}\nPlease wait...`);
+            // Clean up search results
+            if (searchResultMessage) {
+                await searchResultMessage.delete().catch(() => {});
+                searchResultMessage = null;
+            }
 
-            // Download the audio using youtubeHandler
-            const filename = `${video.title.replace(/[^a-z0-9]/gi, '_')}`;
-            const outputPath = await downloadYoutubeAudio(video.url, filename);
-            
             // Play the downloaded file
-            const resource = createAudioResource(outputPath, {
-                inputType: StreamType.Arbitrary,
-                inlineVolume: true
-            });
-
-            const player = createAudioPlayer({
-                behaviors: {
-                    noSubscriber: NoSubscriberBehavior.Play
-                }
-            });
-
-            player.on(AudioPlayerStatus.Playing, () => {
-                isPlaying = true;
-                interaction.followUp(`Now playing: ${video.title}`);
-            });
-
-            player.on(AudioPlayerStatus.Idle, () => {
-                isPlaying = false;
-                startPlayback(connection);
-            });
-
-            player.on('error', async error => {
-                console.error('Player error:', error);
-                isPlaying = false;
-                await interaction.followUp('Playback error occurred.');
-                startPlayback(connection);
-            });
-
-            // Play the audio
-            player.play(resource);
-            connection.subscribe(player);
-            currentPlayer = player;
-
-            // Update now playing message
-            await updateNowPlayingEmbed({
-                title: video.title,
-                artist: video.author
-            });
+            await playAudio(interaction, outputPath);
+            await interaction.editReply(`Now playing: ${video.title}`);
 
         } catch (error) {
             console.error('Download/playback error:', error);
-            await interaction.followUp('Failed to download or play the video. Please try again.');
-            startPlayback(connection);
+            await interaction.editReply('Failed to download or play the video. Please try again.');
         }
+
     } catch (error) {
         console.error('Play error:', error);
-        if (!interaction.replied) {
-            await interaction.reply('Failed to play the selected video');
+        if (!interaction.deferred) {
+            await interaction.reply('Failed to process the command');
         } else {
-            await interaction.editReply('Failed to play the selected video');
+            await interaction.editReply('Failed to process the command');
         }
     }
 }
