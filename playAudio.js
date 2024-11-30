@@ -306,22 +306,42 @@ client.on('interactionCreate', async interaction => {
                     return;
                 }
 
-                await interaction.deferReply();
-                console.log('Attempting to connect...');
-                let voiceConnection = await setupVoiceConnection();
-                console.log('Connection established');
-                loadPlaylist();
-                
-                if (playlist.length === 0) {
-                    await interaction.editReply('No songs available. Please add some MP3 files first.');
-                    return;
-                }
+                try {
+                    await interaction.deferReply();
+                    console.log('Attempting to connect...');
+                    const voiceConnection = await setupVoiceConnection();
+                    console.log('Connection established');
+                    loadPlaylist();
+                    
+                    if (playlist.length === 0) {
+                        await interaction.reply({ 
+                            content: 'No songs available. Please add some MP3 files first.',
+                            ephemeral: true 
+                        });
+                        return;
+                    }
 
-                const success = await startPlayback(voiceConnection);
-                if (success) {
-                    await interaction.editReply('Connected and started playlist!');
-                } else {
-                    await interaction.editReply('Connected but failed to start playback.');
+                    const success = await startPlayback(voiceConnection);
+                    if (success) {
+                        await interaction.followUp({ 
+                            content: 'Connected and started playlist!',
+                            ephemeral: true 
+                        });
+                    } else {
+                        await interaction.followUp({ 
+                            content: 'Connected but failed to start playback.',
+                            ephemeral: true 
+                        });
+                    }
+                } catch (error) {
+                    console.error('Connect error:', error);
+                    if (!interaction.replied) {
+                        await interaction.followUp({ 
+                            content: 'Failed to connect to voice channel',
+                            ephemeral: true 
+                        });
+                    }
+                    isConnected = false;
                 }
                 break;
 
