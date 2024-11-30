@@ -651,31 +651,15 @@ async function handleYoutubeSearch(interaction) {
     try {
         const query = interaction.options.getString('query');
         
-        // Delete previous search result if it exists
-        if (searchResultMessage) {
-            try {
-                await searchResultMessage.delete().catch(() => {});
-                searchResultMessage = null;
-            } catch (error) {
-                console.error('Error deleting previous search message:', error);
-            }
-        }
-
-        // Clear previous timeout
-        if (lastSearchTimeout) {
-            clearTimeout(lastSearchTimeout);
-            lastSearchTimeout = null;
-        }
-
         // Initial reply
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply();
         
         // Perform search
         console.log('Searching YouTube for:', query);
         const results = await searchYoutube(query);
         
         if (!results || results.length === 0) {
-            await interaction.editReply({ content: 'No results found.', ephemeral: true });
+            await interaction.editReply('No results found.');
             return;
         }
 
@@ -689,28 +673,17 @@ async function handleYoutubeSearch(interaction) {
         });
         response += 'Use /ytplay <number> to play a video';
 
-        // Send search results
-        searchResultMessage = await interaction.channel.send(response);
-        
-        // Confirm to user
-        await interaction.editReply({ content: 'Search results posted above ☝️', ephemeral: true });
-
-        // Set auto-delete timeout
-        lastSearchTimeout = setTimeout(async () => {
-            if (searchResultMessage) {
-                await searchResultMessage.delete().catch(() => {});
-                searchResultMessage = null;
-            }
-        }, 30000);
+        // Send results
+        await interaction.editReply(response);
 
     } catch (error) {
         console.error('Search error:', error);
-        const errorMessage = { content: 'Failed to search YouTube', ephemeral: true };
+        const errorMessage = 'Failed to search YouTube';
         
-        if (!interaction.deferred) {
-            await interaction.reply(errorMessage);
+        if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({ content: errorMessage, ephemeral: true });
         } else {
-            await interaction.editReply(errorMessage);
+            await interaction.editReply({ content: errorMessage, ephemeral: true });
         }
     }
 }
