@@ -107,39 +107,38 @@ async function setupVoiceConnection() {
     }
 }
 
-function initializeSearch() {
-    // Create searchable items with both filename and cleaned name
-    const searchItems = playlist.map(filename => ({
-        filename,
-        cleanName: filename
-            .replace('.mp3', '')
-            .replace(/_/g, ' ')
-            .replace(/-/g, ' - ')
-    }));
-
-    // Configure Fuse.js options
-    const options = {
-        keys: ['filename', 'cleanName'],
-        includeScore: true,
-        threshold: 0.4,
-        minMatchCharLength: 2
-    };
-
-    // Initialize with empty array if no items
-    fuseSearch = new Fuse(searchItems.length > 0 ? searchItems : [{ filename: '', cleanName: '' }], options);
+function loadPlaylist() {
+    try {
+        if (!fs.existsSync(MUSIC_DIR)) {
+            fs.mkdirSync(MUSIC_DIR, { recursive: true });
+        }
+        
+        const files = fs.readdirSync(MUSIC_DIR);
+        playlist = files.filter(file => file.endsWith('.mp3'));
+        console.log('Loaded playlist:', playlist);
+        
+        // Initialize search when playlist is loaded
+        initializeSearch();
+        return playlist.length > 0;
+    } catch (error) {
+        console.error('Error loading playlist:', error);
+        return false;
+    }
 }
 
-function loadPlaylist() {
-    // Create music directory if it doesn't exist
-    if (!fs.existsSync(MUSIC_DIR)) {
-        fs.mkdirSync(MUSIC_DIR);
-    }
-
-    playlist = fs.readdirSync(MUSIC_DIR)
-        .filter(file => file.endsWith('.mp3'));
+function initializeSearch() {
+    const searchItems = playlist.map(filename => ({
+        filename,
+        cleanName: filename.replace('.mp3', '').replace(/_/g, ' ')
+    }));
     
-    // Initialize fuseSearch even with empty playlist
-    initializeSearch();
+    const options = {
+        keys: ['cleanName'],
+        threshold: 0.4
+    };
+    
+    fuseSearch = new Fuse(searchItems, options);
+    console.log('Search initialized with', searchItems.length, 'items');
 }
 
 function shufflePlaylist() {
@@ -149,7 +148,7 @@ function shufflePlaylist() {
     }
 }
 
-async function startPlayback(connection = null, interaction = null) {
+async function startPlayback(connection = null) {
     try {
         if (!connection) {
             connection = await setupVoiceConnection();
@@ -163,9 +162,12 @@ async function startPlayback(connection = null, interaction = null) {
             }
         }
 
-        // Rest of playback logic...
-        return true;
+        // Pick a random song
+        const randomIndex = Math.floor(Math.random() * playlist.length);
+        const songFilename = playlist[randomIndex];
+        console.log('Starting playback with:', songFilename);
 
+        return await playSpecificSong(songFilename, connection);
     } catch (error) {
         console.error('Playback error:', error);
         return false;
