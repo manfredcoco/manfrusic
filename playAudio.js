@@ -649,7 +649,12 @@ const formatTime = (seconds) => {
 async function handleYoutubeSearch(interaction) {
     try {
         const query = interaction.options.getString('query');
-        await interaction.deferReply();
+        
+        // First reply immediately to acknowledge the command
+        await interaction.reply({ 
+            content: 'Searching YouTube...', 
+            ephemeral: true 
+        });
         
         const results = await searchYoutube(query);
         if (!results || results.length === 0) {
@@ -665,11 +670,17 @@ async function handleYoutubeSearch(interaction) {
         });
         response += 'Use /ytplay <number> to play a video';
 
-        // Use editReply instead of followUp
-        await interaction.editReply(response);
+        // Create a new message instead of editing
+        await interaction.channel.send(response);
+        await interaction.editReply('Search completed! Check results above ☝️');
+
     } catch (error) {
         console.error('Search error:', error);
-        await interaction.editReply('Failed to search YouTube');
+        if (!interaction.replied) {
+            await interaction.reply('Failed to search YouTube');
+        } else {
+            await interaction.editReply('Failed to search YouTube');
+        }
     }
 }
 
