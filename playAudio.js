@@ -41,6 +41,7 @@ let currentSongStartTime = null;
 let updateInterval = null;
 let nowPlayingMessageId = null;
 let nowPlayingMessage = null;
+let isPlaying = false;
 
 const client = new Client({
     intents: [
@@ -360,25 +361,17 @@ client.on('interactionCreate', async interaction => {
                 break;
 
             case 'skip':
-                if (!isConnected || !currentPlayer) {
+                if (!isPlaying || !currentPlayer) {
                     await interaction.reply('Nothing is currently playing!');
                     return;
                 }
+                
                 try {
-                    const connection = getVoiceConnection(SERVER_ID);
-                    if (!connection) {
-                        await interaction.reply('No active connection found!');
-                        return;
-                    }
-                    isSkipping = true;
                     currentPlayer.stop();
-                    await startPlayback(connection, interaction);
-                    await interaction.reply('Skipped to next song!');
+                    await interaction.reply('Skipped the current song.');
                 } catch (error) {
-                    console.error('Skip error:', error);
-                    await interaction.reply('Failed to skip song');
-                } finally {
-                    isSkipping = false;
+                    console.error('Error skipping song:', error);
+                    await interaction.reply('Failed to skip the current song.');
                 }
                 break;
 
@@ -552,38 +545,46 @@ async function playSpecificSong(songFilename, connection) {
         const songInfo = await getSongInfo(songFilename);
         console.log('Playing:', songInfo.title);
 
-        // Create the resource first
+        // Create the resource and player
         const resource = createAudioResource(join(MUSIC_DIR, songFilename), {
             inputType: StreamType.Arbitrary
         });
 
-        // Set up the player
         const player = createAudioPlayer({
             behaviors: {
                 noSubscriber: NoSubscriberBehavior.Play
             }
         });
 
-        // Play the resource
-        player.play(resource);
-        connection.subscribe(player);
-
-        // Update the now playing message after starting playback
-        await updateNowPlayingEmbed(songInfo);
-
         // Set up player events
+        player.on(AudioPlayerStatus.Playing, () => {
+            isPlaying = true;
+        });
+
         player.on(AudioPlayerStatus.Idle, () => {
+            isPlaying = false;
             startPlayback(connection);
         });
 
         player.on('error', error => {
             console.error('Player error:', error);
+            isPlaying = false;
             startPlayback(connection);
         });
+
+        // Play the resource
+        player.play(resource);
+        connection.subscribe(player);
+        currentPlayer = player;
+
+        // Update the now playing message
+        await updateNowPlayingEmbed(songInfo);
 
         return true;
     } catch (error) {
         console.error('Playback error:', error);
+        isPlaying = false;
+        currentPlayer = null;
         return false;
     }
 }
