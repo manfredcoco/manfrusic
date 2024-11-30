@@ -649,6 +649,9 @@ const formatTime = (seconds) => {
 
 async function handleYoutubeSearch(interaction) {
     try {
+        // Get the search query from the interaction
+        const query = interaction.options.getString('query');
+        
         // Clear previous search timeout if exists
         if (lastSearchTimeout) {
             clearTimeout(lastSearchTimeout);
@@ -657,16 +660,13 @@ async function handleYoutubeSearch(interaction) {
         // Delete previous search result if exists
         if (searchResultMessage) {
             try {
-                await searchResultMessage.delete();
+                await searchResultMessage.delete().catch(() => {});
             } catch (error) {
                 console.error('Error deleting previous search message:', error);
             }
         }
 
-        await interaction.reply({ 
-            content: 'Searching YouTube...', 
-            ephemeral: true 
-        });
+        await interaction.deferReply();
         
         const results = await searchYoutube(query);
         if (!results || results.length === 0) {
@@ -682,6 +682,9 @@ async function handleYoutubeSearch(interaction) {
         });
         response += 'Use /ytplay <number> to play a video';
 
+        // Delete the deferred reply
+        await interaction.deleteReply().catch(() => {});
+
         // Store the new search result message
         searchResultMessage = await interaction.channel.send(response);
         
@@ -689,7 +692,7 @@ async function handleYoutubeSearch(interaction) {
         lastSearchTimeout = setTimeout(async () => {
             try {
                 if (searchResultMessage) {
-                    await searchResultMessage.delete();
+                    await searchResultMessage.delete().catch(() => {});
                     searchResultMessage = null;
                 }
             } catch (error) {
@@ -697,14 +700,9 @@ async function handleYoutubeSearch(interaction) {
             }
         }, 30000);
 
-        await interaction.editReply({ 
-            content: 'Search completed! Check results above ☝️',
-            ephemeral: true 
-        });
-
     } catch (error) {
         console.error('Search error:', error);
-        if (!interaction.replied) {
+        if (!interaction.deferred && !interaction.replied) {
             await interaction.reply({ content: 'Failed to search YouTube', ephemeral: true });
         } else {
             await interaction.editReply({ content: 'Failed to search YouTube', ephemeral: true });
