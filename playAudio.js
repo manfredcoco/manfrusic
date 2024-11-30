@@ -691,7 +691,7 @@ async function handleYoutubePlay(interaction) {
         const number = interaction.options.getInteger('number');
         
         if (!searchResults || !searchResults[number - 1]) {
-            await interaction.editReply('No valid search results found. Please search first using /ytsearch');
+            await interaction.followUp('No valid search results found. Please search first using /ytsearch');
             return;
         }
 
@@ -699,26 +699,32 @@ async function handleYoutubePlay(interaction) {
         const connection = getVoiceConnection(interaction.guildId);
         
         if (!connection) {
-            await interaction.editReply('Not connected to a voice channel. Use /join first!');
+            await interaction.followUp('Not connected to a voice channel. Use /join first!');
             return;
         }
 
         try {
-            await interaction.editReply(`Downloading: ${video.title}\nPlease wait...`);
-
             // Stop current playback if any
             stopCurrentPlayback();
+            
+            await interaction.followUp(`Downloading: ${video.title}\nPlease wait...`);
 
             // Create a readable stream from ytdl
             const stream = ytdl(video.url, {
                 filter: 'audioonly',
                 quality: 'highestaudio',
-                highWaterMark: 1 << 25
+                highWaterMark: 1 << 25,
+                requestOptions: {
+                    headers: {
+                        cookie: process.env.YOUTUBE_COOKIE // Add this if you have it
+                    }
+                }
             });
 
             // Create the audio resource
             const resource = createAudioResource(stream, {
-                inputType: StreamType.Arbitrary
+                inputType: StreamType.Arbitrary,
+                inlineVolume: true
             });
 
             // Create and configure the audio player
@@ -728,21 +734,29 @@ async function handleYoutubePlay(interaction) {
                 }
             });
 
-            // Set up player events similar to playSpecificSong
+            // Set up stream error handling
+            stream.on('error', async error => {
+                console.error('Stream error:', error);
+                await interaction.followUp('Error during stream playback. Please try again.');
+                startPlayback(connection);
+            });
+
+            // Set up player events
             player.on(AudioPlayerStatus.Playing, () => {
                 isPlaying = true;
+                interaction.followUp(`Now playing: ${video.title}`);
             });
 
             player.on(AudioPlayerStatus.Idle, () => {
                 isPlaying = false;
-                startPlayback(connection); // Continue with regular playlist
+                startPlayback(connection);
             });
 
             player.on('error', async error => {
                 console.error('Player error:', error);
                 isPlaying = false;
                 await interaction.followUp('Playback error occurred.');
-                startPlayback(connection); // Continue with regular playlist
+                startPlayback(connection);
             });
 
             // Play the audio
@@ -756,12 +770,10 @@ async function handleYoutubePlay(interaction) {
                 artist: video.author
             });
 
-            await interaction.editReply(`Now playing: ${video.title}`);
-
         } catch (error) {
             console.error('Download/playback error:', error);
-            await interaction.followUp('Failed to download or play the video');
-            startPlayback(connection); // Fallback to regular playlist
+            await interaction.followUp('Failed to download or play the video. Please try again.');
+            startPlayback(connection);
         }
     } catch (error) {
         console.error('Command error:', error);
