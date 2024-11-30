@@ -595,21 +595,19 @@ function sanitizeFilename(filename) {
 
 async function getSongInfo(filePath) {
     try {
-        const fullPath = join(MUSIC_DIR, filePath);
-        const metadata = await parseFile(fullPath);
-        return {
-            title: metadata.common.title || path.basename(filePath, '.mp3'),
-            artist: metadata.common.artist || 'Unknown Artist',
-            duration: metadata.format.duration || 0
-        };
-    } catch (error) {
-        console.error('Metadata parsing error:', error);
-        // Fallback to filename parsing
+        // Just use the filename parsing for now
         const filename = path.basename(filePath, '.mp3');
         const parts = filename.split(' - ');
         return {
             title: parts[1] || filename,
             artist: parts[0] || 'Unknown Artist',
+            duration: 0
+        };
+    } catch (error) {
+        console.error('Error parsing song info:', error);
+        return {
+            title: path.basename(filePath, '.mp3'),
+            artist: 'Unknown Artist',
             duration: 0
         };
     }
@@ -641,10 +639,7 @@ function createProgressBar(current, total, isPaused = false) {
 async function updateNowPlayingEmbed(songInfo) {
     try {
         const channel = await client.channels.fetch(process.env.MUSIC_CHANNEL_ID);
-        if (!channel) {
-            console.error('Could not find music channel');
-            return;
-        }
+        if (!channel) return;
 
         const embed = {
             color: 0x0099ff,
@@ -656,44 +651,33 @@ async function updateNowPlayingEmbed(songInfo) {
             timestamp: new Date()
         };
 
-        try {
-            // If we don't have a message ID, create a new message
-            if (!nowPlayingMessageId) {
-                const message = await channel.send({ 
-                    embeds: [embed],
-                    fetchReply: true
-                });
-                nowPlayingMessageId = message.id;
-                await message.react('⏭️');
-            } else {
-                // Try to edit existing message
-                try {
-                    const message = await channel.messages.fetch(nowPlayingMessageId);
-                    await message.edit({ embeds: [embed] });
-                } catch (error) {
-                    // If message doesn't exist anymore, create a new one
-                    console.log('Previous message not found, creating new one');
-                    const message = await channel.send({ 
-                        embeds: [embed],
-                        fetchReply: true
-                    });
-                    nowPlayingMessageId = message.id;
-                    await message.react('⏭️');
-                }
+        // Always send a new message and store its ID
+        const message = await channel.send({ 
+            embeds: [embed]
+        });
+
+        // Wait a second before adding reaction
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await message.react('⏭️');
+
+        // Store the new message ID
+        nowPlayingMessageId = message.id;
+
+        // Remove old messages in the channel (except the newest one)
+        const messages = await channel.messages.fetch({ limit: 10 });
+        messages.forEach(msg => {
+            if (msg.id !== nowPlayingMessageId && msg.author.id === client.user.id) {
+                msg.delete().catch(() => {});
             }
-        } catch (error) {
-            console.error('Error updating now playing message:', error);
-            // Reset message ID if there was an error
-            nowPlayingMessageId = null;
-        }
+        });
+
     } catch (error) {
         console.error('Failed to update now playing message:', error);
-        nowPlayingMessageId = null;
     }
 }
 
-function formatTime(seconds) {
+const formatTime = (seconds) => {
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = Math.floor(seconds % 60);
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-}
+};
