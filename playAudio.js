@@ -301,15 +301,17 @@ client.on('interactionCreate', async interaction => {
                 }
 
                 try {
-                    // Defer the reply immediately
-                    await interaction.deferReply();
+                    await interaction.reply({ 
+                        content: 'Connecting to voice channel...',
+                        ephemeral: true 
+                    });
                     
                     console.log('Attempting to connect...');
                     const voiceConnection = await setupVoiceConnection();
                     console.log('Connection established');
                     
                     if (!loadPlaylist()) {
-                        await interaction.editReply({ 
+                        await interaction.followUp({ 
                             content: 'No songs available. Please add some MP3 files first.',
                             ephemeral: true 
                         });
@@ -317,10 +319,15 @@ client.on('interactionCreate', async interaction => {
                     }
 
                     isConnected = true;
-                    const success = await startPlayback(voiceConnection, interaction);
+                    const success = await startPlayback(voiceConnection);
                     
-                    if (!success) {
-                        await interaction.editReply({ 
+                    if (success) {
+                        await interaction.followUp({ 
+                            content: 'Connected and started playback!',
+                            ephemeral: true 
+                        });
+                    } else {
+                        await interaction.followUp({ 
                             content: 'Connected but failed to start playback.',
                             ephemeral: true 
                         });
@@ -328,7 +335,7 @@ client.on('interactionCreate', async interaction => {
                 } catch (error) {
                     console.error('Connect error:', error);
                     isConnected = false;
-                    await interaction.editReply({ 
+                    await interaction.followUp({ 
                         content: 'Failed to connect to voice channel',
                         ephemeral: true 
                     });
@@ -625,8 +632,20 @@ function createProgressBar(current, total, isPaused = false) {
     return `\`${formatTime(current)} ${bar} ${formatTime(total)}\``;
 }
 
-async function updateNowPlayingEmbed(songInfo, interaction = null) {
+async function updateNowPlayingEmbed(songInfo) {
     try {
+        const channel = await client.channels.fetch(process.env.MUSIC_CHANNEL_ID);
+        if (!channel) return;
+
+        // Delete previous message if it exists
+        if (currentNowPlayingMessage) {
+            try {
+                await currentNowPlayingMessage.delete().catch(() => {});
+            } catch (error) {
+                // Ignore deletion errors
+            }
+        }
+
         const embed = {
             color: 0x0099ff,
             title: '🎵 Now Playing',
@@ -645,32 +664,11 @@ async function updateNowPlayingEmbed(songInfo, interaction = null) {
             timestamp: new Date()
         };
 
-        // If we have an interaction, use it
-        if (interaction) {
-            await interaction.editReply({ embeds: [embed] });
-            currentNowPlayingMessage = await interaction.fetchReply();
-        } else {
-            // Otherwise send to the channel
-            const channel = await client.channels.fetch(process.env.MUSIC_CHANNEL_ID);
-            if (!channel) return;
+        // Send new message
+        currentNowPlayingMessage = await channel.send({ embeds: [embed] });
 
-            // Delete previous message if it exists
-            if (currentNowPlayingMessage) {
-                try {
-                    await currentNowPlayingMessage.delete().catch(() => {});
-                } catch (error) {
-                    // Ignore deletion errors
-                }
-            }
-
-            currentNowPlayingMessage = await channel.send({ 
-                embeds: [embed],
-                fetchReply: true 
-            });
-        }
-
-        // Add reaction only if we have a valid message
-        if (currentNowPlayingMessage && !currentNowPlayingMessage.deleted) {
+        // Add reaction
+        if (currentNowPlayingMessage) {
             try {
                 await currentNowPlayingMessage.react('⏭️');
             } catch (error) {
