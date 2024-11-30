@@ -44,7 +44,7 @@ let nowPlayingMessageId = null;
 let nowPlayingMessage = null;
 let isPlaying = false;
 let searchResults = [];
-let searchResultsMessage = null;
+let searchResultMessage = null;
 let lastSearchTimeout = null;
 
 const client = new Client({
@@ -651,16 +651,27 @@ async function handleYoutubeSearch(interaction) {
     try {
         const query = interaction.options.getString('query');
         
-        // Initial reply
+        // Clear previous timeout if exists
+        if (lastSearchTimeout) {
+            clearTimeout(lastSearchTimeout);
+        }
+
+        // Delete previous search result if exists
+        if (searchResultMessage) {
+            try {
+                await searchResultMessage.delete().catch(() => {});
+                searchResultMessage = null;
+            } catch (error) {
+                console.error('Error deleting previous search message:', error);
+            }
+        }
+
         await interaction.reply({ 
             content: 'Searching YouTube...', 
             ephemeral: true 
         });
         
-        // Perform search
-        console.log('Searching YouTube for:', query);
         const results = await searchYoutube(query);
-        
         if (!results || results.length === 0) {
             await interaction.followUp({ 
                 content: 'No results found.', 
@@ -669,37 +680,55 @@ async function handleYoutubeSearch(interaction) {
             return;
         }
 
-        // Store results globally
         searchResults = results;
         
-        // Build response message
         let response = '**YouTube Search Results:**\n\n';
         results.forEach((video, index) => {
             response += `${index + 1}. ${video.title}\n   Duration: ${video.duration} | Channel: ${video.author}\n\n`;
         });
         response += 'Use /ytplay <number> to play a video';
 
-        // Send results as a follow-up message
-        await interaction.followUp(response);
+        // Store the search result message
+        searchResultMessage = await interaction.channel.send(response);
+
+        // Set timeout to delete after 30 seconds
+        lastSearchTimeout = setTimeout(async () => {
+            if (searchResultMessage) {
+                await searchResultMessage.delete().catch(() => {});
+                searchResultMessage = null;
+            }
+        }, 30000);
+
+        await interaction.followUp({ 
+            content: 'Search results posted above ☝️', 
+            ephemeral: true 
+        });
 
     } catch (error) {
         console.error('Search error:', error);
+        const errorMessage = { 
+            content: 'Failed to search YouTube', 
+            ephemeral: true 
+        };
+        
         if (!interaction.replied) {
-            await interaction.reply({ 
-                content: 'Failed to search YouTube', 
-                ephemeral: true 
-            });
+            await interaction.reply(errorMessage);
         } else {
-            await interaction.followUp({ 
-                content: 'Failed to search YouTube', 
-                ephemeral: true 
-            });
+            await interaction.followUp(errorMessage);
         }
     }
 }
 
 async function handleYoutubePlay(interaction) {
     try {
+        await interaction.deferReply();
+        const number = interaction.options.getInteger('number');
+        
+        if (!searchResults || !searchResults[number - 1]) {
+            await interaction.editReply('No valid search results found. Please search first using /ytsearch');
+            return;
+        }
+
         // Clear search timeout since we're playing a selection
         if (lastSearchTimeout) {
             clearTimeout(lastSearchTimeout);
@@ -709,19 +738,11 @@ async function handleYoutubePlay(interaction) {
         // Delete search result message if it exists
         if (searchResultMessage) {
             try {
-                await searchResultMessage.delete();
+                await searchResultMessage.delete().catch(() => {});
                 searchResultMessage = null;
             } catch (error) {
                 console.error('Error deleting search message:', error);
             }
-        }
-
-        await interaction.reply('Processing your request...');
-        const number = interaction.options.getInteger('number');
-        
-        if (!searchResults || !searchResults[number - 1]) {
-            await interaction.followUp('No valid search results found. Please search first using /ytsearch');
-            return;
         }
 
         const video = searchResults[number - 1];
@@ -788,11 +809,11 @@ async function handleYoutubePlay(interaction) {
             startPlayback(connection);
         }
     } catch (error) {
-        console.error('Command error:', error);
+        console.error('Play error:', error);
         if (!interaction.replied) {
-            await interaction.reply('An error occurred while processing the command');
+            await interaction.reply('Failed to play the selected video');
         } else {
-            await interaction.followUp('An error occurred while processing the command');
+            await interaction.editReply('Failed to play the selected video');
         }
     }
 }
