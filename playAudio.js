@@ -748,23 +748,28 @@ async function handleYoutubePlay(interaction) {
                 return;
             }
 
-            // Update the playlist and play
-            const musicFiles = await loadPlaylist();
-            if (musicFiles.includes(path.basename(outputPath))) {
-                await playAudio(interaction, path.basename(outputPath));
-                await interaction.editReply(`Now playing: ${video.title}`);
-            } else {
-                await interaction.editReply('Failed to find the downloaded file in playlist.');
-            }
+            // Get the filename without the full path
+            const filename = path.basename(outputPath);
+            
+            // Wait a moment for the file system to update
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Play the file directly
+            await playAudio(interaction, filename);
+            await interaction.editReply(`Now playing: ${video.title}`);
 
         } catch (error) {
             console.error('Download/playback error:', error);
-            await interaction.editReply('Failed to download or play the video. Please try again.');
+            if (interaction.replied) {
+                await interaction.editReply('Failed to download or play the video. Please try again.');
+            } else {
+                await interaction.reply('Failed to download or play the video. Please try again.');
+            }
         }
 
     } catch (error) {
         console.error('Play error:', error);
-        if (!interaction.replied && !interaction.deferred) {
+        if (!interaction.replied) {
             await interaction.reply({ 
                 content: 'Failed to process the command', 
                 ephemeral: true 
