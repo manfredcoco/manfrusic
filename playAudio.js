@@ -618,6 +618,12 @@ async function getSongInfo(filePath) {
 client.on('messageCreate', async message => {
     if (message.channelId !== process.env.MUSIC_CHANNEL_ID) return;
     
+    // Don't delete the now playing message
+    if (message.id === nowPlayingMessage?.id) return;
+    
+    // Don't delete bot messages that are embeds (now playing messages)
+    if (message.author.id === client.user.id && message.embeds.length > 0) return;
+    
     if (!message.content.startsWith('/')) {
         await message.delete().catch(console.error);
         return;
