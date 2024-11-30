@@ -15,7 +15,7 @@ const fs = require('fs');
 const Fuse = require('fuse.js');
 const WebSocket = require('ws');
 const { searchYoutube, downloadYoutubeAudio } = require('./youtubeHandler');
-const { parseFile } = require('music-metadata');
+const musicMetadata = require('music-metadata');
 const path = require('path');
 const { StreamType } = require('@discordjs/voice');
 
@@ -587,7 +587,8 @@ function sanitizeFilename(filename) {
 
 async function getSongInfo(filePath) {
     try {
-        const metadata = await parseFile(join(MUSIC_DIR, filePath));
+        const fullPath = join(MUSIC_DIR, filePath);
+        const metadata = await musicMetadata.parseFile(fullPath);
         return {
             title: metadata.common.title || path.basename(filePath, '.mp3'),
             duration: metadata.format.duration || 0,
@@ -631,6 +632,9 @@ function createProgressBar(current, total, isPaused = false) {
 
 async function updateNowPlayingEmbed(songInfo) {
     try {
+        const channel = await client.channels.fetch(process.env.MUSIC_CHANNEL_ID);
+        if (!channel) return;
+
         // Delete old message if it exists
         if (currentNowPlayingMessage) {
             try {
@@ -638,48 +642,42 @@ async function updateNowPlayingEmbed(songInfo) {
             } catch (error) {
                 // Ignore deletion errors
             }
-            currentNowPlayingMessage = null;
         }
-        
-        // Send new message
-        const channel = await client.channels.fetch(process.env.MUSIC_CHANNEL_ID);
-        if (!channel) return;
 
-        // Create embed for better formatting
+        // Create embed
         const embed = {
             color: 0x0099ff,
             title: '🎵 Now Playing',
             fields: [
                 {
                     name: 'Title',
-                    value: songInfo.title,
+                    value: songInfo.title || 'Unknown',
+                    inline: true
                 },
                 {
                     name: 'Artist',
-                    value: songInfo.artist,
+                    value: songInfo.artist || 'Unknown',
+                    inline: true
                 }
             ],
-            timestamp: new Date(),
+            timestamp: new Date()
         };
 
-        currentNowPlayingMessage = await channel.send({
-            embeds: [embed]
-        });
+        // Send new message and store reference
+        const message = await channel.send({ embeds: [embed] });
+        currentNowPlayingMessage = message;
 
-        // Add reaction after a short delay
-        if (currentNowPlayingMessage) {
-            // Wait 1 second before adding reaction
-            setTimeout(async () => {
-                try {
-                    await currentNowPlayingMessage.react('⏭️');
-                } catch (error) {
-                    console.error('Failed to add reaction:', error);
-                }
-            }, 1000);
+        // Add reaction after ensuring message exists
+        if (message && message.id) {
+            try {
+                await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms
+                await message.react('⏭️');
+            } catch (error) {
+                console.error('Failed to add reaction:', error);
+            }
         }
     } catch (error) {
         console.error('Failed to update now playing message:', error);
-        currentNowPlayingMessage = null;
     }
 }
 
