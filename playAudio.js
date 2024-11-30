@@ -15,7 +15,7 @@ const fs = require('fs');
 const Fuse = require('fuse.js');
 const WebSocket = require('ws');
 const { searchYoutube, downloadYoutubeAudio } = require('./youtubeHandler');
-const musicMetadata = require('music-metadata');
+const { parseFile } = require('music-metadata');
 const path = require('path');
 const { StreamType } = require('@discordjs/voice');
 
@@ -321,13 +321,14 @@ client.on('interactionCreate', async interaction => {
                         return;
                     }
 
-                    isConnected = true;
-                    const success = await startPlayback(voiceConnection);
-                    
                     await interaction.reply({ 
-                        content: success ? 'Connected and started playlist!' : 'Connected but failed to start playback.',
+                        content: 'Connected to voice channel! Starting playback...',
                         ephemeral: true 
                     });
+
+                    isConnected = true;
+                    await startPlayback(voiceConnection);
+                    
                 } catch (error) {
                     console.error('Connect error:', error);
                     isConnected = false;
@@ -586,7 +587,7 @@ function sanitizeFilename(filename) {
 
 async function getSongInfo(filePath) {
     try {
-        const metadata = await musicMetadata.parseFile(join(MUSIC_DIR, filePath));
+        const metadata = await parseFile(join(MUSIC_DIR, filePath));
         return {
             title: metadata.common.title || path.basename(filePath, '.mp3'),
             duration: metadata.format.duration || 0,
@@ -637,29 +638,48 @@ async function updateNowPlayingEmbed(songInfo) {
             } catch (error) {
                 // Ignore deletion errors
             }
+            currentNowPlayingMessage = null;
         }
-        
-        // Reset the current message
-        currentNowPlayingMessage = null;
         
         // Send new message
         const channel = await client.channels.fetch(process.env.MUSIC_CHANNEL_ID);
         if (!channel) return;
 
+        // Create embed for better formatting
+        const embed = {
+            color: 0x0099ff,
+            title: '🎵 Now Playing',
+            fields: [
+                {
+                    name: 'Title',
+                    value: songInfo.title,
+                },
+                {
+                    name: 'Artist',
+                    value: songInfo.artist,
+                }
+            ],
+            timestamp: new Date(),
+        };
+
         currentNowPlayingMessage = await channel.send({
-            content: `🎵 Now Playing:\n**${songInfo.title}**\nArtist: ${songInfo.artist}`
+            embeds: [embed]
         });
 
-        // Add reaction
+        // Add reaction after a short delay
         if (currentNowPlayingMessage) {
-            try {
-                await currentNowPlayingMessage.react('⏭️').catch(() => {});
-            } catch (error) {
-                console.error('Failed to add reaction:', error);
-            }
+            // Wait 1 second before adding reaction
+            setTimeout(async () => {
+                try {
+                    await currentNowPlayingMessage.react('⏭️');
+                } catch (error) {
+                    console.error('Failed to add reaction:', error);
+                }
+            }, 1000);
         }
     } catch (error) {
         console.error('Failed to update now playing message:', error);
+        currentNowPlayingMessage = null;
     }
 }
 
