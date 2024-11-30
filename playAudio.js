@@ -721,34 +721,41 @@ async function handleYoutubeSearch(interaction) {
 
 async function handleYoutubePlay(interaction) {
     try {
-        // Initial reply must happen first
-        await interaction.deferReply();
         const number = interaction.options.getInteger('number');
         
         if (!searchResults || !searchResults[number - 1]) {
-            await interaction.editReply('No valid search results found. Please search first using /ytsearch');
+            await interaction.reply({ 
+                content: 'No valid search results found. Please search first using /ytsearch', 
+                ephemeral: true 
+            });
             return;
         }
 
         const video = searchResults[number - 1];
-        const sanitizedTitle = video.title.replace(/[^a-z0-9]/gi, '_');
+        const sanitizedTitle = video.title.replace(/[^a-z0-9]/gi, '_').substring(0, 200);
 
-        // Update status
-        await interaction.editReply(`Downloading: ${video.title}\nPlease wait...`);
+        // Send initial response
+        await interaction.reply(`Downloading: ${video.title}\nPlease wait...`);
 
         try {
             // Download the video
             const outputPath = await downloadYoutubeAudio(video.url, sanitizedTitle);
             
-            // Clean up search results
-            if (searchResultMessage) {
-                await searchResultMessage.delete().catch(() => {});
-                searchResultMessage = null;
+            // Play the downloaded file
+            const connection = getVoiceConnection(interaction.guild.id);
+            if (!connection) {
+                await interaction.editReply('Not connected to a voice channel!');
+                return;
             }
 
-            // Play the downloaded file
-            await playAudio(interaction, outputPath);
-            await interaction.editReply(`Now playing: ${video.title}`);
+            // Update the playlist and play
+            const musicFiles = await loadPlaylist();
+            if (musicFiles.includes(path.basename(outputPath))) {
+                await playAudio(interaction, path.basename(outputPath));
+                await interaction.editReply(`Now playing: ${video.title}`);
+            } else {
+                await interaction.editReply('Failed to find the downloaded file in playlist.');
+            }
 
         } catch (error) {
             console.error('Download/playback error:', error);
@@ -757,10 +764,11 @@ async function handleYoutubePlay(interaction) {
 
     } catch (error) {
         console.error('Play error:', error);
-        if (!interaction.deferred) {
-            await interaction.reply('Failed to process the command');
-        } else {
-            await interaction.editReply('Failed to process the command');
+        if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({ 
+                content: 'Failed to process the command', 
+                ephemeral: true 
+            });
         }
     }
 }
