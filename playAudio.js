@@ -45,6 +45,7 @@ let nowPlayingMessage = null;
 let isPlaying = false;
 let searchResults = [];
 let searchResultsMessage = null;
+let lastSearchTimeout = null;
 
 const client = new Client({
     intents: [
@@ -196,9 +197,8 @@ process.on('unhandledRejection', (error) => {
 
 client.once('ready', () => {
     console.log('Bot is ready');
-    nowPlayingMessage = null;
-    nowPlayingMessageId = null; // Reset message ID on bot start
-    loadPlaylist(); // Load the playlist on startup
+    cleanupBotMessages();
+    loadPlaylist();
 });
 
 // Connect with retry logic
@@ -649,9 +649,20 @@ const formatTime = (seconds) => {
 
 async function handleYoutubeSearch(interaction) {
     try {
-        const query = interaction.options.getString('query');
-        
-        // First reply immediately to acknowledge the command
+        // Clear previous search timeout if exists
+        if (lastSearchTimeout) {
+            clearTimeout(lastSearchTimeout);
+        }
+
+        // Delete previous search result if exists
+        if (searchResultMessage) {
+            try {
+                await searchResultMessage.delete();
+            } catch (error) {
+                console.error('Error deleting previous search message:', error);
+            }
+        }
+
         await interaction.reply({ 
             content: 'Searching YouTube...', 
             ephemeral: true 
@@ -663,7 +674,7 @@ async function handleYoutubeSearch(interaction) {
             return;
         }
 
-        searchResults = results; // Store results globally
+        searchResults = results;
         
         let response = '**YouTube Search Results:**\n\n';
         results.forEach((video, index) => {
@@ -671,22 +682,54 @@ async function handleYoutubeSearch(interaction) {
         });
         response += 'Use /ytplay <number> to play a video';
 
-        // Create a new message instead of editing
-        await interaction.channel.send(response);
-        await interaction.editReply('Search completed! Check results above ☝️');
+        // Store the new search result message
+        searchResultMessage = await interaction.channel.send(response);
+        
+        // Set timeout to delete the message after 30 seconds
+        lastSearchTimeout = setTimeout(async () => {
+            try {
+                if (searchResultMessage) {
+                    await searchResultMessage.delete();
+                    searchResultMessage = null;
+                }
+            } catch (error) {
+                console.error('Error deleting search message:', error);
+            }
+        }, 30000);
+
+        await interaction.editReply({ 
+            content: 'Search completed! Check results above ☝️',
+            ephemeral: true 
+        });
 
     } catch (error) {
         console.error('Search error:', error);
         if (!interaction.replied) {
-            await interaction.reply('Failed to search YouTube');
+            await interaction.reply({ content: 'Failed to search YouTube', ephemeral: true });
         } else {
-            await interaction.editReply('Failed to search YouTube');
+            await interaction.editReply({ content: 'Failed to search YouTube', ephemeral: true });
         }
     }
 }
 
 async function handleYoutubePlay(interaction) {
     try {
+        // Clear search timeout since we're playing a selection
+        if (lastSearchTimeout) {
+            clearTimeout(lastSearchTimeout);
+            lastSearchTimeout = null;
+        }
+
+        // Delete search result message if it exists
+        if (searchResultMessage) {
+            try {
+                await searchResultMessage.delete();
+                searchResultMessage = null;
+            } catch (error) {
+                console.error('Error deleting search message:', error);
+            }
+        }
+
         await interaction.reply('Processing your request...');
         const number = interaction.options.getInteger('number');
         
@@ -765,5 +808,16 @@ async function handleYoutubePlay(interaction) {
         } else {
             await interaction.followUp('An error occurred while processing the command');
         }
+    }
+}
+
+async function cleanupBotMessages() {
+    try {
+        const channel = await client.channels.fetch(process.env.MUSIC_CHANNEL_ID);
+        const messages = await channel.messages.fetch();
+        const botMessages = messages.filter(msg => msg.author.id === client.user.id);
+        await channel.bulkDelete(botMessages);
+    } catch (error) {
+        console.error('Error cleaning up messages:', error);
     }
 }
