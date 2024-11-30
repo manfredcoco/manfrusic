@@ -18,6 +18,7 @@ const { searchYoutube, downloadYoutubeAudio } = require('./youtubeHandler');
 const musicMetadata = require('music-metadata');
 const path = require('path');
 const { StreamType } = require('@discordjs/voice');
+const { parseFile } = require('music-metadata');
 
 if (!process.env.BOT_TOKEN) {
     console.error('BOT_TOKEN is not set in environment variables');
@@ -38,6 +39,7 @@ let isSkipping = false;
 let currentNowPlayingMessage = null;
 let currentSongStartTime = null;
 let updateInterval = null;
+let nowPlayingMessageId = null;
 
 const client = new Client({
     intents: [
@@ -189,6 +191,7 @@ process.on('unhandledRejection', (error) => {
 
 client.once('ready', () => {
     console.log('Bot is ready');
+    nowPlayingMessageId = null; // Reset message ID on bot start
     loadPlaylist(); // Load the playlist on startup
 });
 
@@ -593,7 +596,7 @@ function sanitizeFilename(filename) {
 async function getSongInfo(filePath) {
     try {
         const fullPath = join(MUSIC_DIR, filePath);
-        const metadata = await musicMetadata.parseFile(fullPath);
+        const metadata = await parseFile(fullPath);
         return {
             title: metadata.common.title || path.basename(filePath, '.mp3'),
             artist: metadata.common.artist || 'Unknown Artist',
@@ -643,16 +646,6 @@ async function updateNowPlayingEmbed(songInfo) {
             return;
         }
 
-        // Delete previous message if it exists
-        if (currentNowPlayingMessage) {
-            try {
-                await currentNowPlayingMessage.delete().catch(() => {});
-            } catch (error) {
-                console.error('Error deleting previous message:', error);
-            }
-            currentNowPlayingMessage = null;
-        }
-
         const embed = {
             color: 0x0099ff,
             title: '🎵 Now Playing',
@@ -664,27 +657,38 @@ async function updateNowPlayingEmbed(songInfo) {
         };
 
         try {
-            // Send message and wait for it to be sent
-            const message = await channel.send({ 
-                embeds: [embed],
-                fetchReply: true // This ensures we get the message object back
-            });
-
-            // Store the message reference
-            currentNowPlayingMessage = message;
-
-            // Wait a moment before adding reaction
-            await new Promise(resolve => setTimeout(resolve, 1000));
-
-            // Only add reaction if message still exists
-            if (message && !message.deleted) {
+            // If we don't have a message ID, create a new message
+            if (!nowPlayingMessageId) {
+                const message = await channel.send({ 
+                    embeds: [embed],
+                    fetchReply: true
+                });
+                nowPlayingMessageId = message.id;
                 await message.react('⏭️');
+            } else {
+                // Try to edit existing message
+                try {
+                    const message = await channel.messages.fetch(nowPlayingMessageId);
+                    await message.edit({ embeds: [embed] });
+                } catch (error) {
+                    // If message doesn't exist anymore, create a new one
+                    console.log('Previous message not found, creating new one');
+                    const message = await channel.send({ 
+                        embeds: [embed],
+                        fetchReply: true
+                    });
+                    nowPlayingMessageId = message.id;
+                    await message.react('⏭️');
+                }
             }
         } catch (error) {
-            console.error('Error sending/updating now playing message:', error);
+            console.error('Error updating now playing message:', error);
+            // Reset message ID if there was an error
+            nowPlayingMessageId = null;
         }
     } catch (error) {
         console.error('Failed to update now playing message:', error);
+        nowPlayingMessageId = null;
     }
 }
 
