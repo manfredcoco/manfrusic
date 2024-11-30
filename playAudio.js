@@ -15,6 +15,9 @@ const fs = require('fs');
 const Fuse = require('fuse.js');
 const WebSocket = require('ws');
 const { searchYoutube, downloadYoutubeAudio } = require('./youtubeHandler');
+const mm = require('music-metadata');
+const path = require('path');
+const { StreamType } = require('@discordjs/voice');
 
 if (!process.env.BOT_TOKEN) {
     console.error('BOT_TOKEN is not set in environment variables');
@@ -32,6 +35,9 @@ let lastSearchResults = [];
 let youtubeSearchResults = [];
 let isConnected = false; // Track connection state
 let isSkipping = false;
+let currentNowPlayingMessage = null;
+let currentSongStartTime = null;
+let updateInterval = null;
 
 const client = new Client({
     intents: [
@@ -359,6 +365,20 @@ const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);
 // Update the event handler
 client.on('interactionCreate', async interaction => {
     if (!interaction.isCommand()) return;
+    if (interaction.channelId !== process.env.MUSIC_CHANNEL_ID) return;
+
+    // Delete the command message
+    await interaction.deferReply({ ephemeral: false });
+
+    // Store the response message for later deletion
+    const response = await interaction.fetchReply();
+    
+    // Delete after 60 seconds if not a now-playing message
+    if (interaction.commandName !== 'play' && interaction.commandName !== 'ytplay') {
+        setTimeout(() => {
+            response.delete().catch(console.error);
+        }, 60000);
+    }
 
     try {
         switch (interaction.commandName) {
@@ -551,7 +571,6 @@ client.on('interactionCreate', async interaction => {
 
 async function playSpecificSong(songFilename, connection = null) {
     try {
-        // Only setup connection if we don't have one
         if (!connection && !getVoiceConnection(SERVER_ID)) {
             connection = await setupVoiceConnection();
         } else if (!connection) {
@@ -563,6 +582,10 @@ async function playSpecificSong(songFilename, connection = null) {
             currentPlayer.stop();
         }
 
+        // Get song info including metadata
+        const songPath = path.join(MUSIC_DIR, songFilename);
+        const songInfo = await getSongInfo(songPath);
+        
         const player = createAudioPlayer({
             behaviors: {
                 noSubscriber: NoSubscriberBehavior.Play,
@@ -571,39 +594,78 @@ async function playSpecificSong(songFilename, connection = null) {
         });
         currentPlayer = player;
 
-        const songPath = join(MUSIC_DIR, songFilename);
         const resource = createAudioResource(songPath, {
             inlineVolume: true,
-            inputType: 'mp3',
-            silencePaddingFrames: 5,
-            highWaterMark: 1024 * 1024 * 50
+            inputType: StreamType.Arbitrary
         });
         
         resource.volume?.setVolume(currentVolume);
         connection.subscribe(player);
 
-        // Only add disconnection handler if it doesn't exist
-        if (!connection.listeners(VoiceConnectionStatus.Disconnected).length) {
-            connection.on(VoiceConnectionStatus.Disconnected, async () => {
-                try {
-                    await Promise.race([
-                        entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
-                        entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
-                    ]);
-                } catch (error) {
-                    connection.destroy();
-                    if (!isSkipping) {
-                        startPlayback().catch(console.error);
-                    }
-                }
-            });
+        // Clear existing interval if any
+        if (updateInterval) {
+            clearInterval(updateInterval);
         }
+
+        // Create or update now playing message
+        currentSongStartTime = Date.now();
+        const nowPlayingData = {
+            ...songInfo,
+            currentTime: 0,
+            isPaused: false
+        };
+
+        if (currentNowPlayingMessage) {
+            await currentNowPlayingMessage.delete().catch(console.error);
+        }
+
+        currentNowPlayingMessage = await updateNowPlayingEmbed(nowPlayingData);
+
+        // Set up progress bar update interval
+        updateInterval = setInterval(async () => {
+            if (!currentPlayer || currentPlayer.state.status === AudioPlayerStatus.Idle) {
+                clearInterval(updateInterval);
+                return;
+            }
+
+            const elapsed = (Date.now() - currentSongStartTime) / 1000;
+            nowPlayingData.currentTime = elapsed;
+            await updateNowPlayingEmbed(nowPlayingData, currentNowPlayingMessage);
+        }, 5000); // Update every 5 seconds
+
+        // Set up reaction collector
+        const collector = currentNowPlayingMessage.createReactionCollector({
+            filter: (reaction, user) => {
+                return ['⏯️', '⏭️'].includes(reaction.emoji.name) && !user.bot;
+            },
+            time: songInfo.duration * 1000 // Convert to milliseconds
+        });
+
+        collector.on('collect', async (reaction, user) => {
+            // Remove user's reaction
+            reaction.users.remove(user);
+
+            if (reaction.emoji.name === '⏯️') {
+                if (player.state.status === AudioPlayerStatus.Playing) {
+                    player.pause();
+                    nowPlayingData.isPaused = true;
+                } else if (player.state.status === AudioPlayerStatus.Paused) {
+                    player.unpause();
+                    nowPlayingData.isPaused = false;
+                }
+                await updateNowPlayingEmbed(nowPlayingData, currentNowPlayingMessage);
+            } else if (reaction.emoji.name === '⏭️') {
+                isSkipping = true;
+                player.stop();
+                startPlayback(connection).catch(console.error);
+            }
+        });
 
         player.on(AudioPlayerStatus.Playing, () => {
             console.log('Audio playback started');
         });
 
-        player.on(AudioPlayerStatus.Idle, (oldState) => {
+        player.on(AudioPlayerStatus.Idle, async (oldState) => {
             if (oldState.status === AudioPlayerStatus.Playing && !isSkipping) {
                 setTimeout(() => {
                     if (currentPlayer === player) {
@@ -637,3 +699,93 @@ function sanitizeFilename(filename) {
         .toLowerCase()
         .substring(0, 200);
 } 
+
+async function getSongInfo(filePath) {
+    try {
+        const metadata = await mm.parseFile(filePath);
+        if (metadata.common.title) {
+            return {
+                title: metadata.common.title,
+                artist: metadata.common.artist || 'Unknown Artist',
+                duration: metadata.format.duration || 0
+            };
+        }
+    } catch (error) {
+        console.error('Metadata parsing error:', error);
+    }
+
+    // Fallback to filename if no metadata
+    const filename = path.basename(filePath, '.mp3')
+        .replace(/_/g, ' ')
+        .replace(/-/g, ' - ');
+    
+    return {
+        title: filename,
+        artist: 'Unknown Artist',
+        duration: 0
+    };
+} 
+
+client.on('messageCreate', async message => {
+    if (message.channelId !== process.env.MUSIC_CHANNEL_ID) return;
+    
+    if (!message.content.startsWith('/')) {
+        await message.delete().catch(console.error);
+        return;
+    }
+});
+
+function createProgressBar(current, total, isPaused = false) {
+    const length = 15;
+    const progress = Math.floor((current / total) * length);
+    const emptyChar = '─';
+    const fillChar = '━';
+    const pointer = isPaused ? '⏸' : '🔘';
+    
+    const bar = fillChar.repeat(progress) + 
+                pointer + 
+                emptyChar.repeat(length - progress - 1);
+                
+    return `\`${formatTime(current)} ${bar} ${formatTime(total)}\``;
+}
+
+async function updateNowPlayingEmbed(songInfo, message = null) {
+    const embed = {
+        color: 0x3498db,
+        author: {
+            name: '🎵 Now Playing'
+        },
+        title: songInfo.title,
+        description: `by ${songInfo.artist}`,
+        fields: [
+            {
+                name: '\u200b',
+                value: createProgressBar(
+                    songInfo.currentTime, 
+                    songInfo.duration,
+                    songInfo.isPaused
+                )
+            }
+        ],
+        footer: {
+            text: songInfo.isPaused ? '⏸ Paused' : '▶ Playing'
+        },
+        timestamp: new Date()
+    };
+
+    if (message) {
+        return await message.edit({ embeds: [embed] });
+    } else {
+        const channel = client.channels.cache.get(process.env.MUSIC_CHANNEL_ID);
+        const msg = await channel.send({ embeds: [embed] });
+        await msg.react('⏯️');
+        await msg.react('⏭️');
+        return msg;
+    }
+}
+
+function formatTime(seconds) {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.floor(seconds % 60);
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+}
