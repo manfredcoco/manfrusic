@@ -148,26 +148,18 @@ function shufflePlaylist() {
     }
 }
 
-async function startPlayback(connection = null) {
+async function startPlayback(connection, interaction = null) {
     try {
-        if (!connection) {
-            connection = await setupVoiceConnection();
+        if (!playlist || playlist.length === 0) {
+            console.error('No songs in playlist');
+            return false;
         }
 
-        if (playlist.length === 0) {
-            loadPlaylist();
-            if (playlist.length === 0) {
-                console.log('No MP3 files found in music directory');
-                return false;
-            }
-        }
-
-        // Pick a random song
         const randomIndex = Math.floor(Math.random() * playlist.length);
         const songFilename = playlist[randomIndex];
         console.log('Starting playback with:', songFilename);
 
-        return await playSpecificSong(songFilename, connection);
+        return await playSpecificSong(songFilename, connection, interaction);
     } catch (error) {
         console.error('Playback error:', error);
         return false;
@@ -309,30 +301,34 @@ client.on('interactionCreate', async interaction => {
                 }
 
                 try {
+                    // Defer the reply immediately
+                    await interaction.deferReply();
+                    
                     console.log('Attempting to connect...');
                     const voiceConnection = await setupVoiceConnection();
                     console.log('Connection established');
                     
                     if (!loadPlaylist()) {
-                        await interaction.reply({ 
+                        await interaction.editReply({ 
                             content: 'No songs available. Please add some MP3 files first.',
                             ephemeral: true 
                         });
                         return;
                     }
 
-                    await interaction.reply({ 
-                        content: 'Connected to voice channel! Starting playback...',
-                        ephemeral: true 
-                    });
-
                     isConnected = true;
-                    await startPlayback(voiceConnection);
+                    const success = await startPlayback(voiceConnection, interaction);
                     
+                    if (!success) {
+                        await interaction.editReply({ 
+                            content: 'Connected but failed to start playback.',
+                            ephemeral: true 
+                        });
+                    }
                 } catch (error) {
                     console.error('Connect error:', error);
                     isConnected = false;
-                    await interaction.reply({ 
+                    await interaction.editReply({ 
                         content: 'Failed to connect to voice channel',
                         ephemeral: true 
                     });
@@ -539,7 +535,7 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-async function playSpecificSong(songFilename, connection) {
+async function playSpecificSong(songFilename, connection, interaction = null) {
     try {
         const songPath = join(MUSIC_DIR, songFilename);
         if (!fs.existsSync(songPath)) {
@@ -567,9 +563,8 @@ async function playSpecificSong(songFilename, connection) {
         currentPlayer.play(resource);
         connection.subscribe(currentPlayer);
         
-        // Update now playing message
-        currentSongStartTime = Date.now();
-        await updateNowPlayingEmbed(songInfo);
+        // Update now playing message with interaction
+        await updateNowPlayingEmbed(songInfo, interaction);
 
         return true;
     } catch (error) {
@@ -630,21 +625,8 @@ function createProgressBar(current, total, isPaused = false) {
     return `\`${formatTime(current)} ${bar} ${formatTime(total)}\``;
 }
 
-async function updateNowPlayingEmbed(songInfo) {
+async function updateNowPlayingEmbed(songInfo, interaction = null) {
     try {
-        const channel = await client.channels.fetch(process.env.MUSIC_CHANNEL_ID);
-        if (!channel) return;
-
-        // Delete old message if it exists
-        if (currentNowPlayingMessage) {
-            try {
-                await currentNowPlayingMessage.delete().catch(() => {});
-            } catch (error) {
-                // Ignore deletion errors
-            }
-        }
-
-        // Create embed
         const embed = {
             color: 0x0099ff,
             title: '🎵 Now Playing',
@@ -663,15 +645,34 @@ async function updateNowPlayingEmbed(songInfo) {
             timestamp: new Date()
         };
 
-        // Send new message and store reference
-        const message = await channel.send({ embeds: [embed] });
-        currentNowPlayingMessage = message;
+        // If we have an interaction, use it
+        if (interaction) {
+            await interaction.editReply({ embeds: [embed] });
+            currentNowPlayingMessage = await interaction.fetchReply();
+        } else {
+            // Otherwise send to the channel
+            const channel = await client.channels.fetch(process.env.MUSIC_CHANNEL_ID);
+            if (!channel) return;
 
-        // Add reaction after ensuring message exists
-        if (message && message.id) {
+            // Delete previous message if it exists
+            if (currentNowPlayingMessage) {
+                try {
+                    await currentNowPlayingMessage.delete().catch(() => {});
+                } catch (error) {
+                    // Ignore deletion errors
+                }
+            }
+
+            currentNowPlayingMessage = await channel.send({ 
+                embeds: [embed],
+                fetchReply: true 
+            });
+        }
+
+        // Add reaction only if we have a valid message
+        if (currentNowPlayingMessage && !currentNowPlayingMessage.deleted) {
             try {
-                await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms
-                await message.react('⏭️');
+                await currentNowPlayingMessage.react('⏭️');
             } catch (error) {
                 console.error('Failed to add reaction:', error);
             }
