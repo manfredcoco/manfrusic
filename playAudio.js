@@ -15,7 +15,7 @@ const fs = require('fs');
 const Fuse = require('fuse.js');
 const WebSocket = require('ws');
 const { searchYoutube, downloadYoutubeAudio } = require('./youtubeHandler');
-const { parseFile } = require('music-metadata');
+const mm = require('music-metadata');
 const path = require('path');
 const { StreamType } = require('@discordjs/voice');
 
@@ -538,129 +538,44 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-async function playSpecificSong(songFilename, connection = null) {
+async function playSpecificSong(songFilename, connection) {
     try {
-        if (!connection && !getVoiceConnection(SERVER_ID)) {
-            connection = await setupVoiceConnection();
-        } else if (!connection) {
-            connection = getVoiceConnection(SERVER_ID);
+        const songPath = join(MUSIC_DIR, songFilename);
+        if (!fs.existsSync(songPath)) {
+            console.error('Song file not found:', songPath);
+            return false;
         }
 
-        if (currentPlayer) {
-            currentPlayer.removeAllListeners();
-            currentPlayer.stop();
-        }
-
-        // Get song info including metadata
-        const songPath = path.join(MUSIC_DIR, songFilename);
-        const songInfo = await getSongInfo(songPath);
-        
-        const player = createAudioPlayer({
-            behaviors: {
-                noSubscriber: NoSubscriberBehavior.Play,
-                maxMissedFrames: 1000
-            }
-        });
-        currentPlayer = player;
+        const songInfo = await getSongInfo(songFilename);
+        console.log('Playing:', songInfo.title);
 
         const resource = createAudioResource(songPath, {
-            inlineVolume: true,
-            inputType: StreamType.Arbitrary
-        });
-        
-        resource.volume?.setVolume(currentVolume);
-        connection.subscribe(player);
-
-        // Clear existing interval if any
-        if (updateInterval) {
-            clearInterval(updateInterval);
-        }
-
-        // Create or update now playing message
-        currentSongStartTime = Date.now();
-        const nowPlayingData = {
-            ...songInfo,
-            currentTime: 0,
-            isPaused: false
-        };
-
-        if (currentNowPlayingMessage) {
-            await currentNowPlayingMessage.delete().catch(console.error);
-        }
-
-        currentNowPlayingMessage = await updateNowPlayingEmbed(nowPlayingData);
-
-        // Set up progress bar update interval
-        updateInterval = setInterval(async () => {
-            if (!currentPlayer || currentPlayer.state.status === AudioPlayerStatus.Idle) {
-                clearInterval(updateInterval);
-                return;
-            }
-
-            const elapsed = (Date.now() - currentSongStartTime) / 1000;
-            nowPlayingData.currentTime = elapsed;
-            await updateNowPlayingEmbed(nowPlayingData, currentNowPlayingMessage);
-        }, 5000); // Update every 5 seconds
-
-        // Set up reaction collector
-        const collector = currentNowPlayingMessage.createReactionCollector({
-            filter: (reaction, user) => {
-                return ['⏯️', '⏭️'].includes(reaction.emoji.name) && !user.bot;
-            },
-            time: songInfo.duration * 1000 // Convert to milliseconds
+            inputType: StreamType.Arbitrary,
+            inlineVolume: true
         });
 
-        collector.on('collect', async (reaction, user) => {
-            // Remove user's reaction
-            reaction.users.remove(user);
-
-            if (reaction.emoji.name === '⏯️') {
-                if (player.state.status === AudioPlayerStatus.Playing) {
-                    player.pause();
-                    nowPlayingData.isPaused = true;
-                } else if (player.state.status === AudioPlayerStatus.Paused) {
-                    player.unpause();
-                    nowPlayingData.isPaused = false;
+        if (!currentPlayer) {
+            currentPlayer = createAudioPlayer({
+                behaviors: {
+                    noSubscriber: NoSubscriberBehavior.Play
                 }
-                await updateNowPlayingEmbed(nowPlayingData, currentNowPlayingMessage);
-            } else if (reaction.emoji.name === '⏭️') {
-                isSkipping = true;
-                player.stop();
-                startPlayback(connection).catch(console.error);
-            }
-        });
+            });
+        }
 
-        player.on(AudioPlayerStatus.Playing, () => {
-            console.log('Audio playback started');
-        });
+        resource.volume.setVolume(currentVolume);
+        currentPlayer.play(resource);
+        connection.subscribe(currentPlayer);
+        
+        // Update now playing message
+        currentSongStartTime = Date.now();
+        await updateNowPlayingEmbed(songInfo);
 
-        player.on(AudioPlayerStatus.Idle, async (oldState) => {
-            if (oldState.status === AudioPlayerStatus.Playing && !isSkipping) {
-                setTimeout(() => {
-                    if (currentPlayer === player) {
-                        console.log('Song finished naturally, playing next song');
-                        startPlayback(connection).catch(console.error);
-                    }
-                }, 1000);
-            }
-        });
-
-        player.on('error', error => {
-            console.error('Player error:', error);
-            if (error.message !== 'Resource ended prematurely' && currentPlayer === player) {
-                console.log('Attempting to recover from error');
-                player.play(resource);
-            }
-        });
-
-        player.play(resource);
         return true;
-
     } catch (error) {
         console.error('Playback error:', error);
         return false;
     }
-} 
+}
 
 function sanitizeFilename(filename) {
     return filename
@@ -671,7 +586,7 @@ function sanitizeFilename(filename) {
 
 async function getSongInfo(filePath) {
     try {
-        const metadata = await parseFile(filePath);
+        const metadata = await mm.parseFile(join(MUSIC_DIR, filePath));
         return {
             title: metadata.common.title || path.basename(filePath, '.mp3'),
             duration: metadata.format.duration || 0,
