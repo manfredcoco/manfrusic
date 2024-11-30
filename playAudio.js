@@ -307,7 +307,6 @@ client.on('interactionCreate', async interaction => {
                 }
 
                 try {
-                    await interaction.deferReply();
                     console.log('Attempting to connect...');
                     const voiceConnection = await setupVoiceConnection();
                     console.log('Connection established');
@@ -323,24 +322,22 @@ client.on('interactionCreate', async interaction => {
 
                     const success = await startPlayback(voiceConnection);
                     if (success) {
-                        await interaction.followUp({ 
+                        await interaction.reply({ 
                             content: 'Connected and started playlist!',
                             ephemeral: true 
                         });
                     } else {
-                        await interaction.followUp({ 
+                        await interaction.reply({ 
                             content: 'Connected but failed to start playback.',
                             ephemeral: true 
                         });
                     }
                 } catch (error) {
                     console.error('Connect error:', error);
-                    if (!interaction.replied) {
-                        await interaction.followUp({ 
-                            content: 'Failed to connect to voice channel',
-                            ephemeral: true 
-                        });
-                    }
+                    await interaction.reply({ 
+                        content: 'Failed to connect to voice channel',
+                        ephemeral: true 
+                    });
                     isConnected = false;
                 }
                 break;
