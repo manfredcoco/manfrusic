@@ -40,6 +40,7 @@ let currentNowPlayingMessage = null;
 let currentSongStartTime = null;
 let updateInterval = null;
 let nowPlayingMessageId = null;
+let nowPlayingMessage = null;
 
 const client = new Client({
     intents: [
@@ -191,6 +192,7 @@ process.on('unhandledRejection', (error) => {
 
 client.once('ready', () => {
     console.log('Bot is ready');
+    nowPlayingMessage = null;
     nowPlayingMessageId = null; // Reset message ID on bot start
     loadPlaylist(); // Load the playlist on startup
 });
@@ -646,33 +648,45 @@ async function updateNowPlayingEmbed(songInfo) {
             title: '🎵 Now Playing',
             description: `**${songInfo.title}**\nby ${songInfo.artist}`,
             footer: {
-                text: 'React with ⏭️ to skip'
+                text: 'Use /skip to skip the current song'
             },
             timestamp: new Date()
         };
 
-        // Always send a new message and store its ID
-        const message = await channel.send({ 
-            embeds: [embed]
-        });
-
-        // Wait a second before adding reaction
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        await message.react('⏭️');
-
-        // Store the new message ID
-        nowPlayingMessageId = message.id;
-
-        // Remove old messages in the channel (except the newest one)
-        const messages = await channel.messages.fetch({ limit: 10 });
-        messages.forEach(msg => {
-            if (msg.id !== nowPlayingMessageId && msg.author.id === client.user.id) {
-                msg.delete().catch(() => {});
+        // If we already have a message, try to edit it
+        if (nowPlayingMessage) {
+            try {
+                await nowPlayingMessage.edit({ embeds: [embed] });
+                return;
+            } catch (error) {
+                // If edit fails, we'll create a new message
+                nowPlayingMessage = null;
             }
-        });
+        }
 
+        // Create a new message if we don't have one
+        if (!nowPlayingMessage) {
+            try {
+                // Delete any existing bot messages in the channel
+                const messages = await channel.messages.fetch({ limit: 10 });
+                const botMessages = messages.filter(msg => msg.author.id === client.user.id);
+                for (const msg of botMessages.values()) {
+                    try {
+                        await msg.delete();
+                    } catch (error) {
+                        // Ignore deletion errors
+                    }
+                }
+
+                // Send new message
+                nowPlayingMessage = await channel.send({ embeds: [embed] });
+            } catch (error) {
+                console.error('Error creating new now playing message:', error);
+            }
+        }
     } catch (error) {
         console.error('Failed to update now playing message:', error);
+        nowPlayingMessage = null;
     }
 }
 
